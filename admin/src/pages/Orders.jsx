@@ -4,6 +4,7 @@ import PropTypes from 'prop-types'
 import { backendUrl, currency } from '../App'
 import { toast } from 'react-toastify'
 import { assets } from '../assets/assets'
+import OrderActivity from '../components/OrderActivity'
 
 const Orders = ({ token }) => {
 
@@ -121,7 +122,7 @@ const Orders = ({ token }) => {
           <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)} className='border p-2'>
             <option value='all'>All fulfilment states</option>
             {['Order Placed', 'Processing', 'Packing', 'Packed', 'Shipped',
-              'Out for delivery', 'Delivered', 'Cancelled'].map(status => (
+              'Out for delivery', 'Delivered', 'Cancelled', 'Return Requested', 'Return Approved'].map(status => (
               <option value={status} key={status}>{status}</option>
             ))}
           </select>
@@ -155,6 +156,7 @@ const Orders = ({ token }) => {
                 <p className='text-sm sm:text-[15px]'>Items : {order.items.length}</p>
                 <p className='mt-3'>Method : {order.paymentMethod}</p>
                 <p>Payment : {order.paymentStatus || (order.payment ? 'paid' : 'pending')}</p>
+                {order.refundedPaise > 0 && <p>Refunded : {currency}{order.refundedPaise / 100}</p>}
                 {order.razorpayOrderId && <p>Razorpay order : {order.razorpayOrderId}</p>}
                 {order.razorpayPaymentId && <p>Payment reference : {order.razorpayPaymentId}</p>}
                 {order.fulfillmentHold && <p className='mt-1 font-medium text-amber-800'>Payment review hold</p>}
@@ -164,15 +166,11 @@ const Orders = ({ token }) => {
               <select onChange={(event)=>statusHandler(event,order._id)} value={order.status}
                 disabled={order.paymentMethod === 'Razorpay' &&
                   (order.paymentStatus !== 'paid' || order.fulfillmentHold)}
+                aria-label='Fulfilment status'
                 className='p-2 font-semibold disabled:cursor-not-allowed disabled:opacity-50'>
-                <option value="Order Placed">Order Placed</option>
-                <option value="Processing">Processing</option>
-                <option value="Packing">Packing</option>
-                <option value="Packed">Packed</option>
-                <option value="Shipped">Shipped</option>
-                <option value="Out for delivery">Out for delivery</option>
-                <option value="Delivered">Delivered</option>
-                <option value="Cancelled">Cancelled</option>
+                {(order.allowedStatuses || [order.status]).map(status => (
+                  <option value={status} key={status}>{status}</option>
+                ))}
               </select>
               <form onSubmit={event => saveShipping(event, order)} className='col-span-full grid gap-2 border-t pt-4 sm:grid-cols-2'>
                 <label className='grid gap-1'>Courier name
@@ -190,7 +188,7 @@ const Orders = ({ token }) => {
                     onChange={event => updateShippingDraft(order._id, 'trackingUrl', event.target.value)}
                     maxLength={2048} className='border p-2' placeholder='https://...' />
                 </label>
-                <label className='grid gap-1 sm:col-span-2'>Shipping notes
+                <label className='grid gap-1 sm:col-span-2'>Internal shipping notes (never shown to customers)
                   <textarea value={shippingDraft(order).notes}
                     onChange={event => updateShippingDraft(order._id, 'notes', event.target.value)}
                     maxLength={1000} rows={2} className='border p-2' />
@@ -205,6 +203,7 @@ const Orders = ({ token }) => {
                   {savingShippingOrderId === order._id ? 'Saving…' : 'Save shipping details'}
                 </button>
               </form>
+              <OrderActivity order={order} token={token} onChanged={fetchAllOrders} />
             </div>
           ))
         }

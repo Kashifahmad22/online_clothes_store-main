@@ -13,6 +13,7 @@ const PlaceOrder = () => {
     const [submitting, setSubmitting] = useState(false)
     const [paymentMethod, setPaymentMethod] = useState('COD')
     const [pendingPaymentOrder, setPendingPaymentOrder] = useState(null)
+    const [whatsappOptIn, setWhatsappOptIn] = useState(false)
     const checkoutRequestKey = useRef(null)
     const codCheckoutRequestKey = useRef(null)
     const [formData, setFormData] = useState({
@@ -147,7 +148,7 @@ const PlaceOrder = () => {
                 }
                 const response = await axios.post(
                     `${backendUrl}/api/order/razorpay`,
-                    { items, address: formData, idempotencyKey: checkoutRequestKey.current },
+                    { items, address: formData, idempotencyKey: checkoutRequestKey.current, whatsappOptIn },
                     { headers: { token } }
                 )
                 if (!response.data.success) throw new Error(response.data.message || 'Unable to prepare online payment.')
@@ -162,6 +163,7 @@ const PlaceOrder = () => {
                 {
                     items,
                     address: formData,
+                    whatsappOptIn,
                     idempotencyKey: codCheckoutRequestKey.current ||
                         (codCheckoutRequestKey.current = crypto.randomUUID())
                 },
@@ -218,6 +220,11 @@ const PlaceOrder = () => {
                 )}
                 <input required onChange={onChangeHandler} name='phone' value={formData.phone}
                     className='w-full rounded-sm border border-stone-300 px-3.5 py-3' type='tel' inputMode='tel' maxLength={15} placeholder='Mobile number' />
+                <label className='flex items-start gap-3 text-sm text-stone-700'>
+                    <input type='checkbox' checked={whatsappOptIn} disabled={Boolean(pendingPaymentOrder)}
+                        onChange={event => setWhatsappOptIn(event.target.checked)} className='mt-1' />
+                    <span>Send my order updates on WhatsApp to this mobile number (optional).</span>
+                </label>
             </div>
 
             <div className='mt-8'>

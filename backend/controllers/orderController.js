@@ -8,15 +8,31 @@ import {
     calculateSubtotalPaise,
     calculateShippingPaise,
     normalizeDeliveryAddress,
-    validateDeliveryAddress
+    validateDeliveryAddress,
+    whatsappConsentFields
 } from "../utils/orderValidation.js";
 import { isValidIdempotencyKey } from "../utils/paymentSecurity.js";
 import {
+    FULFILLMENT_STATUSES,
+    PHYSICAL_FULFILMENT_STATUSES,
     hasDispatchDetails,
+    historyEntry,
     isEligibleForPrepaidFulfillment,
     isValidFulfillmentTransition,
-    normalizeShippingDetails
+    normalizeShippingDetails,
+    recordFulfilmentStatus
 } from "../utils/orderFulfillment.js";
+import { markCodCollected } from "../utils/orderPayments.js";
+import { serializeAdminOrder, serializeCustomerOrder } from "../utils/orderSerializers.js";
+import { dispatchNotifications, notifications, stageNotification } from "../utils/notifications/index.js";
+
+// Notification event raised when an order enters a fulfilment status.
+const STATUS_NOTIFICATIONS = {
+    Shipped: "order_dispatched",
+    "Out for delivery": "out_for_delivery",
+    Delivered: "order_delivered",
+    "Return Approved": "return_approved"
+};
 
 export const buildOrderItems = async (items, session) => {
     if (!Array.isArray(items) || items.length === 0 || items.length > 50) {
@@ -75,20 +91,7 @@ export const buildOrderItems = async (items, session) => {
     return orderItems;
 };
 
-const serializeOrder = order => {
-    const data = order.toObject ? order.toObject() : order;
-    const items = (data.items || []).map(item => ({
-        ...item,
-        price: Number.isSafeInteger(item.unitPricePaise)
-            ? item.unitPricePaise / 100
-            : item.price,
-        image: Array.isArray(item.image) ? item.image : []
-    }));
-    const amount = Number.isSafeInteger(data.totalPaise)
-        ? data.totalPaise / 100
-        : data.amount;
-    return { ...data, items, amount };
-};
+const serializeOrder = serializeCustomerOrder;
 
 const placeOrder = async (req, res) => {
     const body = req.body || {};
@@ -160,7 +163,12 @@ const placeOrder = async (req, res) => {
                 paymentMethod: "COD",
                 payment: false,
                 paymentStatus: "cod_pending",
+                statusHistory: [
+                    historyEntry({ kind: "fulfilment", to: "Order Placed", actor: "system" }),
+                    historyEntry({ kind: "payment", to: "cod_pending", actor: "system" })
+                ],
                 idempotencyKey: body.idempotencyKey,
+                ...whatsappConsentFields(body),
                 date: Date.now()
             }], { session });
             await userModel.updateOne(
@@ -168,8 +176,10 @@ const placeOrder = async (req, res) => {
                 { $set: { cartData: {} } },
                 { session }
             );
+            await stageNotification(saved, "order_placed", { session });
             savedOrder = saved;
         });
+        dispatchNotifications();
         return res.status(201).json({
             success: true,
             message: "Order placed.",
@@ -221,7 +231,7 @@ const paymentUnavailable = (req, res) => res.status(503).json({
 const allOrders = async (req, res) => {
     try {
         const orders = await orderModel.find({}).sort({ date: -1 }).limit(500);
-        return res.json({ success: true, orders: orders.map(serializeOrder) });
+        return res.json({ success: true, orders: orders.map(serializeAdminOrder) });
     } catch (error) {
         console.error("Admin order list failed:", { name: error.name || "Error" });
         return res.status(500).json({ success: false, message: "Unable to load orders." });
@@ -243,23 +253,23 @@ const updateStatus = async (req, res) => {
     const { orderId, status } = body;
     if (!mongoose.Types.ObjectId.isValid(orderId) ||
         typeof status !== "string" ||
-        !["Order Placed", "Processing", "Packing", "Packed", "Shipped",
-            "Out for delivery", "Delivered", "Cancelled"].includes(status)) {
+        !FULFILLMENT_STATUSES.includes(status)) {
         return res.status(400).json({ success: false, message: "Invalid order ID or status." });
     }
 
     let session;
+    let transitioned = false;
     try {
         session = await mongoose.startSession();
         await session.withTransaction(async () => {
+            transitioned = false;
             const order = await orderModel.findById(orderId).session(session);
             if (!order) throw Object.assign(new Error("Order not found."), { status: 404 });
             if (!isValidFulfillmentTransition(order.status, status)) {
                 throw Object.assign(new Error(`Order cannot move from ${order.status} to ${status}.`), { status: 409 });
             }
             if (order.status === status) return;
-            if (["Processing", "Packing", "Packed", "Shipped", "Out for delivery", "Delivered"]
-                .includes(status) &&
+            if (PHYSICAL_FULFILMENT_STATUSES.includes(status) &&
                 !isEligibleForPrepaidFulfillment(order)) {
                 throw Object.assign(
                     new Error("This prepaid order is unpaid or on payment review hold and cannot be fulfilled."),
@@ -306,9 +316,12 @@ const updateStatus = async (req, res) => {
             if (status === "Shipped") {
                 order.shipping.dispatchDate = new Date();
             }
-            order.status = status;
+            recordFulfilmentStatus(order, status, "admin");
             await order.save({ session });
+            if (STATUS_NOTIFICATIONS[status]) await stageNotification(order, STATUS_NOTIFICATIONS[status], { session });
+            transitioned = true;
         });
+        if (transitioned) dispatchNotifications();
         return res.json({ success: true, message: "Order status updated." });
     } catch (error) {
         if (error.status) {
@@ -354,4 +367,60 @@ const updateShipping = async (req, res) => {
     }
 };
 
-export { allOrders, paymentUnavailable, placeOrder, updateShipping, updateStatus, userOrders };
+const collectCod = async (req, res) => {
+    const orderId = req.body?.orderId;
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+        return res.status(400).json({ success: false, message: "Invalid order ID." });
+    }
+    try {
+        const order = await orderModel.findById(orderId);
+        if (!order) return res.status(404).json({ success: false, message: "Order not found." });
+        const result = markCodCollected(order, "admin");
+        if (result.error) return res.status(409).json({ success: false, message: result.error });
+        await order.save();
+        return res.json({ success: true, message: "Cash collection recorded." });
+    } catch (error) {
+        console.error("COD collection update failed:", { name: error.name || "Error" });
+        return res.status(500).json({ success: false, message: "Unable to record cash collection." });
+    }
+};
+
+const orderNotifications = async (req, res) => {
+    const orderId = req.body?.orderId;
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+        return res.status(400).json({ success: false, message: "Invalid order ID." });
+    }
+    try {
+        return res.json({ success: true, notifications: await notifications.listForOrder(orderId) });
+    } catch (error) {
+        console.error("Notification history failed:", { name: error.name || "Error" });
+        return res.status(500).json({ success: false, message: "Unable to load notification history." });
+    }
+};
+
+const retryNotification = async (req, res) => {
+    const { notificationId, channel } = req.body || {};
+    if (!mongoose.Types.ObjectId.isValid(notificationId) || typeof channel !== "string") {
+        return res.status(400).json({ success: false, message: "Invalid notification or channel." });
+    }
+    try {
+        const result = await notifications.retry(notificationId, channel);
+        if (!result.ok) return res.status(result.status).json({ success: false, message: result.message });
+        return res.json({ success: true, message: "Retry attempted.", outcome: result.outcome });
+    } catch (error) {
+        console.error("Notification retry failed:", { name: error.name || "Error" });
+        return res.status(500).json({ success: false, message: "Unable to retry this notification." });
+    }
+};
+
+export {
+    allOrders,
+    collectCod,
+    orderNotifications,
+    paymentUnavailable,
+    placeOrder,
+    retryNotification,
+    updateShipping,
+    updateStatus,
+    userOrders
+};

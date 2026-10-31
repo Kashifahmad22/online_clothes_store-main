@@ -100,6 +100,85 @@ curl -s https://<storefront>/sitemap.xml
 
 Then check a real product URL in the Facebook Sharing Debugger and by sending it in WhatsApp. Render free instances sleep when idle, so the first crawler request after a quiet period can time out and show no preview; re-sharing normally works once the service is awake.
 
+## Order lifecycle and customer notifications
+
+**Fulfilment status** (`order.status`) and **payment status** (`order.paymentStatus`) are independent.
+Legal fulfilment transitions are enforced server-side in `utils/orderFulfillment.js`:
+`Order Placed → Processing → Packing → Packed → Shipped → Out for delivery → Delivered → Return Requested → Return Approved`
+(`Processing` and `Packing` are optional steps; `Packing` must go through `Packed` before `Shipped`.
+`Return Requested → Delivered` is allowed if the request is rejected). Cancellation is only possible before dispatch
+(`Order Placed`, `Processing`, `Packing`, `Packed`); `Shipped`, `Out for delivery` and `Delivered` orders cannot be cancelled.
+`Cancelled` and `Return Approved` are terminal. Prepaid orders cannot enter a physical status until payment is verified
+and not on review hold.
+`Shipped` never becomes `Delivered` automatically, and `Shipped` requires courier and tracking details.
+Every change is appended to `order.statusHistory` with a timestamp and actor (`admin`, `customer` or `system`; the admin
+API has a single shared admin role, so individual admins are not distinguished).
+
+- COD stays `cod_pending` until an admin uses *Mark COD cash as collected* (only after `Delivered`).
+- Prepaid orders become `paid` only after verified Razorpay capture (client verification or signed webhook).
+- A refund is recorded only from a signed `refund.processed` webhook, never from an admin request. `refunded` is set
+  only when the cumulative processed refunds equal the order total. **Subscribe the Razorpay webhook to `refund.processed`**
+  (Razorpay dashboard setting, not changed by this code), and issue refunds from the Razorpay dashboard.
+- There is no customer self-service return flow: the return window and eligibility are business decisions. Admins can set
+  `Return Requested` / `Return Approved`. Approving a return does not restore stock automatically.
+
+### Notifications
+
+Events: order placed (COD), payment successful (prepaid), dispatched, out for delivery, delivered, return approved,
+refund processed. Delivery can never fail or undo an order, payment or admin update.
+
+**Transactional outbox.** The `NotificationEvent` document is written *inside the same MongoDB transaction* as the order
+change (COD placement, verified payment/webhook, admin status update, processed refund), using an upsert on the unique
+`dedupeKey`. The order change and its event therefore commit or roll back together. Nothing is sent inside a transaction
+(transactions can retry); the transaction only writes the event. If the event write itself fails, the whole transaction
+aborts: for COD checkout the customer sees a retryable error, and for a Razorpay webhook the provider is asked to redeliver.
+After commit, a best-effort nudge triggers delivery, and a background worker (`startNotificationWorker`, started in
+`server.js`) scans MongoDB every 60 seconds and once at startup, so events left pending by a crash or restart are found
+without any in-memory state.
+
+- **Idempotency:** unique `dedupeKey` (`orderId:type[:refundId]`). Repeated webhooks, duplicate verifications or
+  transaction retries do not create new events.
+- **Per-channel state:** `email` and `whatsapp` each track `pending | sent | failed | skipped`, attempts and the last
+  error *code* (no addresses, phone numbers, message bodies or credentials are stored or logged). A failure on one channel
+  never blocks the other.
+- **Retry:** temporary failures (timeouts, 429, 5xx) back off 1 min, 5 min, 30 min, 2 h, 6 h (5 attempts); permanent
+  failures end as `failed`. Each channel is claimed atomically (conditional update with a 2-minute lock) before sending.
+- **Skipped** channels (provider or template not configured, no valid recipient, no WhatsApp opt-in) are not retried
+  automatically; admins can retry them from the order page after fixing the cause. A manual retry resets the attempt count.
+- **Delivery guarantee: at-least-once, not exactly-once.** A provider can accept a message just before the process crashes
+  or before its state is saved, leaving delivery uncertain; after the 2-minute lock expires the worker may send it again.
+  The code cannot remove this window, only narrow it.
+- The worker runs inside the Render web process, so a sleeping free-tier instance delays delivery until it wakes.
+- `server.js` awaits `notificationEventModel.init()` before accepting traffic, which creates the collection and builds the
+  unique `dedupeKey` index. Startup fails if this cannot complete (for example the database user lacks `createIndex`
+  permission), rather than running without duplicate protection. Verify this on the production cluster before launch.
+
+### Email (SMTP via nodemailer)
+
+Set `SMTP_HOST`, `EMAIL_FROM` (required) and `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`. Support contact details
+appear in emails only if configured in storefront settings. No email address is invented.
+
+### WhatsApp (Meta Cloud API)
+
+No WhatsApp integration existed before this phase. Set `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, optionally
+`WHATSAPP_API_VERSION` and `WHATSAPP_TEMPLATE_LANGUAGE`, plus one **approved utility template name** per event
+(`WHATSAPP_TEMPLATE_ORDER_PLACED`, `_PAYMENT_SUCCESS`, `_ORDER_DISPATCHED`, `_OUT_FOR_DELIVERY`, `_ORDER_DELIVERED`,
+`_RETURN_APPROVED`, `_REFUND_PROCESSED`). Only template messages are sent. An event with no template is skipped.
+Body parameters, in order:
+
+| Template | `{{1}}` | `{{2}}` | `{{3}}` | `{{4}}` |
+|---|---|---|---|---|
+| order_placed | customer name | order reference | total | payment method |
+| payment_success | customer name | order reference | amount paid | |
+| order_dispatched | customer name | order reference | courier | tracking number |
+| out_for_delivery, order_delivered, return_approved | customer name | order reference | | |
+| refund_processed | customer name | order reference | refund amount | |
+
+Use these only for transactional (utility) templates, never marketing. WhatsApp is sent **only** to customers who ticked the
+unchecked-by-default "Send my order updates on WhatsApp" box at checkout (`order.whatsappOptIn`, with `whatsappOptInAt`);
+orders without it, including all orders placed before this change, are skipped as `no_opt_in`. Confirm your own consent and
+policy requirements with Meta before enabling WhatsApp.
+
 ## Legacy catalogue migration
 
 Back up the database before migrating. First report the proposed conversion without writing:

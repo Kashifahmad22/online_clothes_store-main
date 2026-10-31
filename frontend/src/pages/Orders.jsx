@@ -137,14 +137,32 @@ const Orders = () => {
               {order.shipping.dispatchDate && (
                 <p>Dispatched: {new Date(order.shipping.dispatchDate).toLocaleDateString('en-IN')}</p>
               )}
-              {order.shipping.trackingUrl && (
+              {order.shipping.trackingUrl && /^https:\/\//i.test(order.shipping.trackingUrl) && (
                 <a className='mt-1 inline-block underline underline-offset-2'
-                  href={order.shipping.trackingUrl} target='_blank' rel='noreferrer'>
+                  href={order.shipping.trackingUrl} target='_blank' rel='noopener noreferrer'>
                   Track shipment
                 </a>
               )}
-              {order.shipping.notes && <p className='mt-1'>{order.shipping.notes}</p>}
             </div>
+          )}
+          {order.refundedPaise > 0 && (
+            <p className='mt-3 text-sm text-stone-700'>
+              Refunded: {currency}{(order.refundedPaise / 100).toFixed(2)}
+              {order.paymentStatus === 'refunded' ? ' (fully refunded)' : ' (partial refund)'}
+            </p>
+          )}
+          {Array.isArray(order.timeline) && order.timeline.some(entry => entry.kind === 'fulfilment') && (
+            <details className='mt-3 text-sm text-stone-700'>
+              <summary className='cursor-pointer font-medium'>Order timeline</summary>
+              <ol className='mt-2 grid gap-1 border-l-2 border-amber-700 pl-4'>
+                {order.timeline.filter(entry => entry.kind === 'fulfilment').map((entry, index) => (
+                  <li key={index}>
+                    {entry.status}
+                    {entry.at && <span className='text-stone-500'> · {new Date(entry.at).toLocaleString('en-IN')}</span>}
+                  </li>
+                ))}
+              </ol>
+            </details>
           )}
           {order.paymentMethod === 'Razorpay' && ['pending', 'failed'].includes(order.paymentStatus) &&
             ((order.reservationHeld && new Date(order.reservationExpiresAt) > new Date()) ||

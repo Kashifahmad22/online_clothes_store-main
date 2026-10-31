@@ -40,6 +40,11 @@ export const normalizeDeliveryAddress = address => ({
     phone: address.phone.trim()
 });
 
+// Records the customer's explicit WhatsApp consent at checkout; only a literal `true` counts.
+export const whatsappConsentFields = body => body?.whatsappOptIn === true
+    ? { whatsappOptIn: true, whatsappOptInAt: new Date() }
+    : { whatsappOptIn: false };
+
 export const calculateSubtotalPaise = items => {
     const subtotal = items.reduce((sum, item) => {
         if (!Number.isSafeInteger(item.unitPricePaise) || item.unitPricePaise < 0 ||

@@ -12,6 +12,8 @@ import orderRouter from './routes/orderRoute.js'
 import storefrontSettingsRouter from './routes/storefrontSettingsRoute.js'
 import seoRouter from './routes/seoRoute.js'
 import { releaseExpiredRazorpayReservations } from './controllers/razorpayController.js'
+import { startNotificationWorker } from './utils/notifications/index.js'
+import notificationEventModel from './models/notificationEventModel.js'
 import { configureAdminAuth } from './utils/adminCredentials.js'
 import { resolveTrustProxyHops } from './utils/proxyConfig.js'
 import { WEBHOOK_PATH, createGeneralApiLimiter, createWebhookLimiter } from './middleware/rateLimiters.js'
@@ -134,6 +136,9 @@ app.use((error, req, res, next) => {
 })
 
 await connectDB()
+// Transactional outbox writes rely on the collection and its unique dedupeKey index existing, so build them
+// before accepting traffic. A failure here stops startup rather than silently running without duplicate protection.
+await notificationEventModel.init()
 await connectCloudinary()
 const reservationReaper = setInterval(() => {
     releaseExpiredRazorpayReservations().catch(error => {
@@ -141,6 +146,7 @@ const reservationReaper = setInterval(() => {
     })
 }, 60 * 1000)
 reservationReaper.unref()
+const notificationWorker = startNotificationWorker()
 const server = app.listen(port, () => console.log(`Server started on PORT : ${port}`))
 
 server.on('error', async error => {
@@ -156,6 +162,7 @@ server.on('error', async error => {
 const shutdown = signal => {
     console.log(`${signal} received; closing the backend.`)
     clearInterval(reservationReaper)
+    notificationWorker.stop()
     server.close(async error => {
         if (error) console.error('Failed to close the HTTP server:', { name: error.name || 'Error' })
         await mongoose.disconnect()

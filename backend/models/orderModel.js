@@ -20,6 +20,21 @@ const shippingSchema = new mongoose.Schema({
     notes: { type: String, trim: true, maxlength: 1000, default: "" }
 }, { _id: false });
 
+const historySchema = new mongoose.Schema({
+    kind: { type: String, enum: ["fulfilment", "payment"], required: true },
+    from: { type: String, default: "" },
+    to: { type: String, required: true },
+    at: { type: Date, default: Date.now },
+    actor: { type: String, enum: ["admin", "customer", "system"], default: "system" },
+    note: { type: String, maxlength: 200 }
+}, { _id: false });
+
+const refundSchema = new mongoose.Schema({
+    refundId: { type: String, required: true },
+    amountPaise: { type: Number, min: 1, validate: Number.isSafeInteger },
+    processedAt: { type: Date }
+}, { _id: false });
+
 const orderSchema = new mongoose.Schema({
     userId: { type: String, ref: "user", required: true, index: true },
     items: { type: [orderItemSchema], required: true, validate: value => value.length > 0 },
@@ -50,6 +65,12 @@ const orderSchema = new mongoose.Schema({
     paymentReviewRequired: { type: Boolean, default: false },
     duplicatePaymentIds: { type: [String], default: [] },
     paidAt: { type: Date },
+    refunds: { type: [refundSchema], default: [] },
+    refundedPaise: { type: Number, min: 0, default: 0, validate: Number.isSafeInteger },
+    statusHistory: { type: [historySchema], default: [] },
+    // Explicit checkout consent to receive order updates on WhatsApp; absent on older orders, which means "no".
+    whatsappOptIn: { type: Boolean, default: false, immutable: true },
+    whatsappOptInAt: { type: Date, immutable: true },
     shipping: { type: shippingSchema, default: () => ({}) },
     date: { type: Number, required: true, default: Date.now }
 }, { timestamps: true });

@@ -1,8 +1,11 @@
 import express from "express";
 import {
     allOrders,
+    collectCod,
+    orderNotifications,
     paymentUnavailable,
     placeOrder,
+    retryNotification,
     updateShipping,
     updateStatus,
     userOrders
@@ -21,6 +24,9 @@ const orderRouter = express.Router();
 orderRouter.post("/list", adminAuth, allOrders);
 orderRouter.post("/status", adminAuth, updateStatus);
 orderRouter.post("/shipping", adminAuth, updateShipping);
+orderRouter.post("/cod-collected", adminAuth, collectCod);
+orderRouter.post("/notifications", adminAuth, orderNotifications);
+orderRouter.post("/notifications/retry", adminAuth, retryNotification);
 orderRouter.post("/place", authUser, placeOrder);
 orderRouter.post("/userorders", authUser, userOrders);
 

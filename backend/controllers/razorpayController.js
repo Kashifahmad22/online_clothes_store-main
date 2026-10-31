@@ -5,11 +5,15 @@ import productVariantModel from "../models/productVariantModel.js";
 import storefrontSettingsModel from "../models/storefrontSettingsModel.js";
 import razorpayWebhookEventModel from "../models/razorpayWebhookEventModel.js";
 import { buildOrderItems } from "./orderController.js";
+import { dispatchNotifications, stageNotification } from "../utils/notifications/index.js";
+import { historyEntry, recordPaymentStatus } from "../utils/orderFulfillment.js";
+import { applyProcessedRefund } from "../utils/orderPayments.js";
 import {
     calculateShippingPaise,
     calculateSubtotalPaise,
     normalizeDeliveryAddress,
-    validateDeliveryAddress
+    validateDeliveryAddress,
+    whatsappConsentFields
 } from "../utils/orderValidation.js";
 import {
     createRazorpayClient,
@@ -24,6 +28,9 @@ import {
 } from "../utils/paymentSecurity.js";
 
 const RESERVATION_DURATION_MS = 15 * 60 * 1000;
+
+// Single seam for the Razorpay SDK client so tests can substitute it and never reach the real API.
+export const razorpayGateway = { client: () => createRazorpayClient() };
 
 const apiError = (message, status = 400) => Object.assign(new Error(message), { status });
 const getPaymentAddress = address => ({
@@ -117,7 +124,7 @@ const settleCapturedPayment = async (order, payment, session) => {
     }
 
     order.payment = true;
-    order.paymentStatus = "paid";
+    recordPaymentStatus(order, "paid");
     order.razorpayPaymentId = payment.id || order.razorpayPaymentId;
     order.fulfillmentHold = fulfillmentHold;
     order.paidAt = new Date();
@@ -136,10 +143,20 @@ const processCapturedPayment = async payment => {
             const order = await orderModel.findOne({ razorpayOrderId: payment.order_id }).session(session);
             if (!order) throw apiError("Payment order was not found.", 404);
             await settleCapturedPayment(order, payment, session);
+            // Outbox write in the same transaction; the unique event key makes a repeat verification a no-op.
+            await stageNotification(order, "payment_success", { session });
         });
     } finally {
         await session.endSession();
     }
+    dispatchNotifications();
+};
+
+const processRefundProcessed = async (order, refund, session) => {
+    const result = applyProcessedRefund(order, refund);
+    if (result.error) throw apiError(result.error, 400);
+    if (result.applied) await order.save({ session });
+    return result;
 };
 
 const processWebhookEvent = async (eventId, event, payload) => {
@@ -154,7 +171,10 @@ const processWebhookEvent = async (eventId, event, payload) => {
                     throw apiError("Webhook payment payload is invalid.", 400);
                 }
                 const order = await orderModel.findOne({ razorpayOrderId: payment.order_id }).session(session);
-                if (order) await settleCapturedPayment(order, payment, session);
+                if (order) {
+                    await settleCapturedPayment(order, payment, session);
+                    await stageNotification(order, "payment_success", { session });
+                }
                 return;
             }
 
@@ -171,7 +191,26 @@ const processWebhookEvent = async (eventId, event, payload) => {
                         currency: paidOrder.currency,
                         status: paidOrder.status === "paid" ? "captured" : paidOrder.status
                     }, session);
+                    await stageNotification(order, "payment_success", { session });
                 }
+                return;
+            }
+
+            if (event === "refund.processed") {
+                const refund = payload.refund?.entity;
+                const payment = payload.payment?.entity;
+                if (!refund || typeof refund.payment_id !== "string") {
+                    throw apiError("Webhook refund payload is invalid.", 400);
+                }
+                const order = await orderModel.findOne({
+                    $or: [
+                        { razorpayPaymentId: refund.payment_id },
+                        ...(typeof payment?.order_id === "string" ? [{ razorpayOrderId: payment.order_id }] : [])
+                    ]
+                }).session(session);
+                if (!order) return;
+                const result = await processRefundProcessed(order, refund, session);
+                if (result.applied) await stageNotification(order, "refund_processed", { session, suffix: refund.id });
                 return;
             }
 
@@ -186,14 +225,15 @@ const processWebhookEvent = async (eventId, event, payload) => {
                     throw apiError("Webhook payment does not match the order amount and currency.", 400);
                 }
                 if (event === "payment.authorized" && order.reservationHeld) {
-                    order.paymentStatus = "authorized";
+                    recordPaymentStatus(order, "authorized");
                 } else if (event === "payment.failed" && order.reservationHeld) {
                     await releaseReservation(order, session);
-                    order.paymentStatus = "failed";
+                    recordPaymentStatus(order, "failed");
                 }
                 await order.save({ session });
             }
         });
+        dispatchNotifications();
         return "processed";
     } finally {
         await session.endSession();
@@ -284,8 +324,13 @@ export const createRazorpayOrder = async (req, res) => {
                 paymentMethod: "Razorpay",
                 payment: false,
                 paymentStatus: "pending",
+                statusHistory: [
+                    historyEntry({ kind: "fulfilment", to: "Order Placed", actor: "system" }),
+                    historyEntry({ kind: "payment", to: "pending", actor: "system" })
+                ],
                 razorpaySetupStatus: "creating",
                 idempotencyKey: body.idempotencyKey,
+                ...whatsappConsentFields(body),
                 reservationExpiresAt: new Date(Date.now() + RESERVATION_DURATION_MS),
                 reservationHeld: true
             }], { session });
@@ -314,7 +359,7 @@ export const createRazorpayOrder = async (req, res) => {
     }
 
     try {
-        const client = createRazorpayClient();
+        const client = razorpayGateway.client();
         const gatewayOrder = await client.orders.create({
             amount: order.totalPaise,
             currency: "INR",
@@ -337,7 +382,7 @@ export const createRazorpayOrder = async (req, res) => {
                 const failedOrder = await orderModel.findById(order._id).session(cleanupSession);
                 if (!failedOrder || failedOrder.paymentStatus === "paid") return;
                 await releaseReservation(failedOrder, cleanupSession);
-                failedOrder.paymentStatus = "failed";
+                recordPaymentStatus(failedOrder, "failed");
                 failedOrder.razorpaySetupStatus = "failed";
                 await failedOrder.save({ session: cleanupSession });
             });
@@ -399,7 +444,7 @@ export const retryRazorpayOrder = async (req, res) => {
                 }
                 order.reservationHeld = true;
                 order.reservationExpiresAt = new Date(Date.now() + RESERVATION_DURATION_MS);
-                order.paymentStatus = "pending";
+                recordPaymentStatus(order, "pending");
                 await order.save({ session });
             });
         } finally {
@@ -438,7 +483,7 @@ export const verifyRazorpayPayment = async (req, res) => {
             !verifyCheckoutSignature(order.razorpayOrderId, paymentId, signature, config.keySecret)) {
             return res.status(400).json({ success: false, message: "Payment signature could not be verified." });
         }
-        const payment = await createRazorpayClient().payments.fetch(paymentId);
+        const payment = await razorpayGateway.client().payments.fetch(paymentId);
         if (!paymentMatchesOrder(payment, order)) {
             return res.status(409).json({ success: false, message: "Payment amount or currency does not match this order." });
         }
@@ -456,7 +501,7 @@ export const verifyRazorpayPayment = async (req, res) => {
         }
         if (payment.status === "authorized") {
             if (order.reservationHeld && order.reservationExpiresAt > new Date()) {
-                order.paymentStatus = "authorized";
+                recordPaymentStatus(order, "authorized");
                 await order.save();
             }
             return res.status(202).json({
@@ -474,7 +519,7 @@ export const verifyRazorpayPayment = async (req, res) => {
                         if (!currentOrder || currentOrder.paymentStatus === "paid") return;
                         if (currentOrder.reservationHeld) {
                             await releaseReservation(currentOrder, session);
-                            currentOrder.paymentStatus = "failed";
+                            recordPaymentStatus(currentOrder, "failed");
                             await currentOrder.save({ session });
                         }
                     });
@@ -552,7 +597,7 @@ export const releaseExpiredRazorpayReservations = async () => {
                     !["pending", "authorized", "failed"].includes(order.paymentStatus) ||
                     order.reservationExpiresAt > new Date()) return;
                 await releaseReservation(order, session);
-                order.paymentStatus = "expired";
+                recordPaymentStatus(order, "expired");
                 await order.save({ session });
             });
         } catch (error) {
