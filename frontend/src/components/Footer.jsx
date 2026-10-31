@@ -5,7 +5,7 @@ import { useContext } from 'react'
 import { ShopContext } from '../context/ShopContext'
 import { policyPages } from '../config/policies'
 import { getWhatsAppSupportUrl } from '../config/support'
-import { availableProductCategories } from '../config/productCategories'
+import { storefrontNavigation } from '../config/productCategories'
 import MadhubaniArtwork from './MadhubaniArtwork'
 
 const FooterLink = ({ link }) => link.url.startsWith('/')
@@ -28,9 +28,10 @@ const Footer = () => {
       .map(page => ({ label: page.label, url: page.path })),
     ...configuredPolicyLinks
   ]
-  const categories = availableProductCategories(products)
+  const categories = storefrontNavigation(products)
   const listedShopUrls = new Set(shopLinks.map(link => link.url))
-  const availableCategoryLinks = categories.filter(category => !listedShopUrls.has(`/category/${category.slug}`))
+  const availableCategoryLinks = categories.filter(category =>
+    category.status === 'upcoming' || !listedShopUrls.has(`/category/${category.slug}`))
   const hasLegalDetails = Boolean(legal.businessName || legal.gstin || legal.registeredAddress ||
     legal.sellerInformation || legal.grievanceContact)
 
@@ -57,7 +58,11 @@ const Footer = () => {
         <ul className='footer-links'>
           {shopLinks.map(link => <li key={`${link.label}-${link.url}`}><FooterLink link={link} /></li>)}
           {availableCategoryLinks.map(category => (
-            <li key={category.slug}><Link to={`/category/${category.slug}`}>{category.label}</Link></li>
+            <li key={category.slug}>
+              {category.status === 'upcoming'
+                ? <span className='footer-links__upcoming'>{category.label}<span className='sr-only'> – </span><span className='coming-soon-badge'>Coming soon</span></span>
+                : <Link to={`/category/${category.slug}`}>{category.label}</Link>}
+            </li>
           ))}
           {activeCampaigns.map(campaign => (
             <li key={campaign.slug}><Link to={`/collections/${campaign.slug}`}>{campaign.name} collection</Link></li>

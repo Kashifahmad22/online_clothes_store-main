@@ -2,6 +2,7 @@ import { Routes, Route, useLocation } from 'react-router-dom'
 import { useContext, useEffect } from 'react'
 import Home from './pages/Home'
 import Collection from './pages/Collection'
+import CategoryPage from './pages/CategoryPage'
 import About from './pages/About'
 import Contact from './pages/Contact'
 import Product from './pages/Product'
@@ -76,7 +77,7 @@ const App = () => {
           <Route path='/' element={<Home />} />
           <Route path='/collection' element={<Collection />} />
           <Route path='/collections/:campaignSlug' element={<Collection mode='campaign' />} />
-          <Route path='/category/:categorySlug' element={<Collection mode='category' />} />
+          <Route path='/category/:categorySlug' element={<CategoryPage />} />
           <Route path='/about' element={<About />} />
           <Route path='/contact' element={<Contact />} />
           {policyPages.map(page => (

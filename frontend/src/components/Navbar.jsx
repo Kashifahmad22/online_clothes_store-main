@@ -5,7 +5,7 @@ import { campaigns } from '../config/campaigns'
 import { getWhatsAppSupportUrl } from '../config/support'
 import { useContext } from 'react'
 import { ShopContext } from '../context/ShopContext'
-import { availableProductCategories } from '../config/productCategories'
+import { storefrontNavigation } from '../config/productCategories'
 import AnnouncementBar from './AnnouncementBar'
 
 const Navbar = () => {
@@ -15,7 +15,7 @@ const Navbar = () => {
   const { setShowSearch, getCartCount, navigate, token, setToken, setCartItems, products, siteSettings, siteSettingsLoaded, siteSettingsError } = useContext(ShopContext)
   const brand = siteSettings.brand
   const whatsappUrl = getWhatsAppSupportUrl(siteSettings.support.whatsapp)
-  const availableCategories = availableProductCategories(products)
+  const availableCategories = storefrontNavigation(products)
   const activeCampaigns = campaigns.filter(campaign =>
     products.some(product => (product.collections || []).includes(campaign.collectionTag))
   )
@@ -84,7 +84,11 @@ const Navbar = () => {
 
         <nav aria-label='Main navigation' className='hidden items-center gap-5 lg:flex'>
           <NavLink to='/collection' className={navClass}>Shop all</NavLink>
-          {availableCategories.slice(0, 3).map(category => (
+          {availableCategories.slice(0, 6).map(category => category.status === 'upcoming' ? (
+            <span key={category.slug} className='nav-link nav-link--upcoming whitespace-nowrap py-2 text-sm font-medium'>
+              {category.label}<span className='sr-only'> – </span><span className='coming-soon-badge'>Coming soon</span>
+            </span>
+          ) : (
             <NavLink key={category.slug} to={`/category/${category.slug}`} className={navClass}>{category.label}</NavLink>
           ))}
           {activeCampaigns.map(campaign => (
@@ -129,7 +133,11 @@ const Navbar = () => {
           <nav aria-label='Mobile navigation' className='flex min-h-full flex-col gap-1 p-5'>
             <button type='button' onClick={closeMenu} className='mb-3 min-h-11 self-end px-3 text-sm text-stone-700'>Close menu</button>
             <NavLink onClick={closeMenu} to='/collection' className='mobile-menu__link'>Shop all products</NavLink>
-            {availableCategories.map(category => (
+            {availableCategories.map(category => category.status === 'upcoming' ? (
+              <span key={category.slug} className='mobile-menu__link mobile-menu__link--upcoming'>
+                {category.label}<span className='sr-only'> – </span><span className='coming-soon-badge'>Coming soon</span>
+              </span>
+            ) : (
               <NavLink key={category.slug} onClick={closeMenu} to={`/category/${category.slug}`} className='mobile-menu__link'>
                 {category.label}
               </NavLink>

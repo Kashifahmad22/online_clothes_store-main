@@ -659,6 +659,96 @@ summary:focus-visible {
   font-size: 14px;
 }
 
+.category-grid--assortment {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.category-tile__label {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.category-tile__label .category-tile__name {
+  color: inherit;
+  font-family: Prata, Georgia, serif;
+  font-size: inherit;
+}
+
+.category-tile__label .category-tile__cta {
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.category-tile__motif {
+  position: absolute;
+  top: 22%;
+  left: 50%;
+  width: 56px;
+  height: 56px;
+  transform: translateX(-50%);
+  color: var(--gold);
+  opacity: .75;
+}
+
+/* Plain and upcoming tiles use the ivory surface instead of photography. */
+.category-tile--plain,
+.category-tile--upcoming {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--wine-dark);
+}
+
+.category-tile--plain .category-tile__label .category-tile__cta {
+  color: var(--wine);
+}
+
+.category-tile--upcoming {
+  cursor: default;
+}
+
+.coming-soon-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--gold);
+  border-radius: 999px;
+  background: #f3ece1;
+  color: var(--wine-dark);
+  font-family: Outfit, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  line-height: 1.5;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.category-tile__label .coming-soon-badge {
+  color: var(--wine-dark);
+  font-size: 10px;
+}
+
+.nav-link--upcoming {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: default;
+}
+
+.nav-link--upcoming .coming-soon-badge {
+  padding: 1px 6px;
+  font-size: 9px;
+}
+
+.mobile-menu__link--upcoming {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .campaign-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -978,6 +1068,48 @@ summary:focus-visible {
 
 .footer-links a:hover {
   color: #e5c992;
+}
+
+.footer-links__upcoming {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  color: #d4c7bb;
+  font-size: 12px;
+}
+
+.category-coming-soon {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+}
+
+.category-coming-soon h1,
+.category-coming-soon p {
+  margin: 0;
+}
+
+.category-coming-soon__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  margin-top: 8px;
+}
+
+.category-coming-soon__actions .button {
+  min-height: 44px;
+}
+
+.category-coming-soon__home {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--wine-dark);
+  font-size: 14px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .footer-legal {
@@ -1896,6 +2028,16 @@ summary:focus-visible {
   .category-tile:last-child:nth-child(odd) {
     grid-column: 1 / -1;
     aspect-ratio: 2 / 1;
+  }
+
+  .category-grid--assortment {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .category-tile__motif {
+    top: 18%;
+    width: 44px;
+    height: 44px;
   }
 
   .category-tile__label {

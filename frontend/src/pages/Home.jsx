@@ -7,22 +7,33 @@ import Hero from '../components/Hero'
 import OptimizedImage from '../components/OptimizedImage'
 import { campaigns } from '../config/campaigns'
 import { getProductImage } from '../utils/productDisplay'
-import { availableProductCategories } from '../config/productCategories'
+import { storefrontNavigation } from '../config/productCategories'
+
+const CategoryMotif = () => (
+  <svg className='category-tile__motif' viewBox='0 0 64 64' aria-hidden='true' focusable='false'>
+    <g fill='none' stroke='currentColor' strokeWidth='1.4'>
+      <path d='M32 6 38 26 58 32 38 38 32 58 26 38 6 32 26 26Z' />
+      <circle cx='32' cy='32' r='6' />
+      <circle cx='32' cy='32' r='25' strokeDasharray='1 5' />
+    </g>
+  </svg>
+)
 
 const Home = () => {
   const { products, productsLoading, productsError, siteSettings } = useContext(ShopContext)
   const featuredProduct = products.find(product => getProductImage(product))
-  const categories = useMemo(() => availableProductCategories(products)
-    .map(category => ({
-      name: category.label,
-      path: `/category/${category.slug}`,
-      product: products.find(item =>
-        (category.type.startsWith('category:')
-          ? item.category === category.label
-          : item.productType === category.type) && getProductImage(item)
-      ) || category.product
-    }))
-    .filter(item => item.product && getProductImage(item.product)), [products])
+  const categories = useMemo(() => storefrontNavigation(products)
+    .map(category => {
+      const product = category.status === 'available'
+        ? products.find(item =>
+          (category.type?.startsWith('category:')
+            ? item.category === category.label
+            : item.productType === category.type) && getProductImage(item)
+        ) || (category.product && getProductImage(category.product) ? category.product : null)
+        : null
+      return { name: category.label, slug: category.slug, status: category.status, path: `/category/${category.slug}`, product }
+    })
+    .slice(0, 6), [products])
   const fabrics = useMemo(() => [...new Set(
     products.map(product => product.details?.fabric).filter(value => typeof value === 'string' && value.trim())
   )].map(name => ({
@@ -43,35 +54,48 @@ const Home = () => {
     <main>
       <Hero product={featuredProduct} brand={siteSettings.brand} />
 
-      {categories.length > 0 && (
-        <section className='home-section'>
-          <div className='section-heading'>
-            <div>
-              <p className='eyebrow'>A little something for every occasion</p>
-              <h2>Shop by collection</h2>
-            </div>
-            <Link to='/collection' className='text-link'>View everything <span aria-hidden='true'>↗</span></Link>
+      <section className='home-section' aria-labelledby='home-categories-heading'>
+        <div className='section-heading'>
+          <div>
+            <p className='eyebrow'>A little something for every occasion</p>
+            <h2 id='home-categories-heading'>Shop by category</h2>
           </div>
-          <div className='category-grid'>
-            {categories.slice(0, 5).map(({ name, path, product }) => {
-              const image = getProductImage(product)
+          <Link to='/collection' className='text-link'>View everything <span aria-hidden='true'>↗</span></Link>
+        </div>
+        <div className='category-grid category-grid--assortment'>
+          {categories.map(({ name, slug, status, path, product }) => {
+            if (status === 'upcoming') {
               return (
-                <Link
-                  key={name}
-                  to={path}
-                  className='category-tile'
-                  aria-label={`Shop ${name}`}
-                >
-                  <OptimizedImage src={image.url} alt={image.altText || product.name}
-                    widths={[240, 360, 480]} sizes='(min-width: 1024px) 25vw, 50vw' />
-                  <span className='category-tile__shade' />
-                  <span className='category-tile__label'>{name}<span aria-hidden='true'>↗</span></span>
-                </Link>
+                <div key={slug} className='category-tile category-tile--upcoming'>
+                  <CategoryMotif />
+                  <span className='category-tile__label'>
+                    <span className='category-tile__name'>{name}</span>
+                    <span className='sr-only'> – </span>
+                    <span className='coming-soon-badge coming-soon-badge--tile'>Coming soon</span>
+                  </span>
+                </div>
               )
-            })}
-          </div>
-        </section>
-      )}
+            }
+            const image = product ? getProductImage(product) : null
+            return (
+              <Link key={slug} to={path} className={`category-tile${image ? '' : ' category-tile--plain'}`}
+                aria-label={`Shop ${name}`}>
+                {image ? (
+                  <>
+                    <OptimizedImage src={image.url} alt={image.altText || product.name}
+                      widths={[240, 360, 480]} sizes='(min-width: 1024px) 25vw, 50vw' />
+                    <span className='category-tile__shade' />
+                  </>
+                ) : <CategoryMotif />}
+                <span className='category-tile__label'>
+                  <span className='category-tile__name'>{name}</span>
+                  <span className='category-tile__cta'>Shop now <span aria-hidden='true'>↗</span></span>
+                </span>
+              </Link>
+            )
+          })}
+        </div>
+      </section>
 
       {fabrics.length > 0 && (
         <section className='home-section'>

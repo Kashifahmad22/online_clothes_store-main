@@ -38,3 +38,31 @@ export const availableProductCategories = products => {
   }
   return [...categories.values()]
 }
+
+// Public assortment shown in navigation and on the homepage. Sarees is the live range; the others
+// become shoppable automatically once a product exists for them, and stay "Coming soon" until then.
+export const storefrontCategories = [
+  { slug: 'sarees', label: 'Sarees', alwaysAvailable: true },
+  { slug: 'suit-pieces', label: 'Suit Pieces' },
+  { slug: 'lehengas', label: 'Lehengas' },
+  { slug: 'kurtis', label: 'Kurtis' }
+]
+
+export const storefrontNavigation = products => {
+  const live = availableProductCategories(products)
+  const liveBySlug = new Map(live.map(category => [category.slug, category]))
+  const featuredSlugs = new Set(storefrontCategories.map(category => category.slug))
+  const featured = storefrontCategories.map(({ slug, label, alwaysAvailable }) => {
+    const match = liveBySlug.get(slug)
+    if (match) return { ...match, label, status: 'available' }
+    return alwaysAvailable
+      ? { slug, label, type: 'saree', product: null, status: 'available' }
+      : { slug, label, product: null, status: 'upcoming' }
+  })
+  const others = live.filter(category => !featuredSlugs.has(category.slug))
+    .map(category => ({ ...category, status: 'available' }))
+  return [...featured, ...others]
+}
+
+export const isUpcomingStorefrontCategory = (slug, products) =>
+  storefrontNavigation(products).some(category => category.slug === slug && category.status === 'upcoming')
