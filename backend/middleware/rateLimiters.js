@@ -1,6 +1,9 @@
-import rateLimit from 'express-rate-limit'
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit'
 
 export const WEBHOOK_PATH = '/api/order/razorpay/webhook'
+
+// IPv6 clients control a whole /64 (often more), so they are grouped by /56 to stop address rotation.
+export const IPV6_SUBNET = 56
 
 // Express routing is case-insensitive and ignores trailing slashes, so normalise the same way.
 export const isWebhookRequest = req => {
@@ -8,9 +11,14 @@ export const isWebhookRequest = req => {
     return path === WEBHOOK_PATH.toLowerCase()
 }
 
+// req.ip honours the configured trust-proxy hop count. A missing address falls into one shared
+// bucket instead of bypassing the limiter.
+export const clientKey = req => ipKeyGenerator(req.ip || 'unknown', IPV6_SUBNET)
+
 const baseOptions = {
     standardHeaders: 'draft-8',
-    legacyHeaders: false
+    legacyHeaders: false,
+    keyGenerator: clientKey
 }
 
 export const createGeneralApiLimiter = ({ limit = 300 } = {}) => rateLimit({
@@ -28,10 +36,10 @@ export const createWebhookLimiter = ({ limit = 120 } = {}) => rateLimit({
     message: { success: false, message: 'Too many webhook requests.' }
 })
 
-export const createAuthLimiter = () => rateLimit({
+export const createAuthLimiter = ({ limit = 10 } = {}) => rateLimit({
     ...baseOptions,
     windowMs: 15 * 60 * 1000,
-    limit: 10,
+    limit,
     message: { success: false, message: 'Too many authentication attempts. Try again later.' }
 })
 

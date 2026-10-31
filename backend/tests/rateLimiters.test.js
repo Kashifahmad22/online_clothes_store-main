@@ -144,3 +144,48 @@ test('admin login counts only failures and is limited per client IP', async () =
         assert.equal((await login('203.0.113.2', false)).status, 401)
     } finally { await close() }
 })
+
+test('IPv6 clients in the same /56 share a bucket; other subnets and IPv4 are separate', async () => {
+    const { base, close } = await startApp({ hops: 1 })
+    try {
+        const a = '2001:db8:abcd:1200::1'
+        const sameSubnet = ['2001:db8:abcd:12ff:1:2:3:4', '2001:db8:abcd:1234::9']
+        assert.equal((await get(base, a)).status, 200)
+        assert.equal((await get(base, sameSubnet[0])).status, 200)
+        assert.equal((await get(base, sameSubnet[1])).status, 200)
+        assert.equal((await get(base, a)).status, 429)
+        assert.equal((await get(base, sameSubnet[0])).status, 429)
+        assert.equal((await get(base, '2001:db8:abcd:1300::1')).status, 200)
+        assert.equal((await get(base, '203.0.113.9')).status, 200)
+    } finally { await close() }
+})
+
+test('IPv4-mapped IPv6 shares a bucket with the plain IPv4 address', async () => {
+    const { base, close } = await startApp({ hops: 1 })
+    try {
+        for (let i = 0; i < 3; i++) assert.equal((await get(base, '203.0.113.7')).status, 200)
+        assert.equal((await get(base, '::ffff:203.0.113.7')).status, 429)
+    } finally { await close() }
+})
+
+test('rotating IPv6 addresses cannot bypass the admin login limit', async () => {
+    const { base, close } = await startApp({ hops: 1, adminLimit: 2 })
+    try {
+        const attempt = n => fetch(base + '/api/user/admin', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'X-Forwarded-For': `2001:db8:1:2:${n}::${n}` },
+            body: JSON.stringify({ ok: false })
+        })
+        assert.equal((await attempt(1)).status, 401)
+        assert.equal((await attempt(2)).status, 401)
+        assert.equal((await attempt(3)).status, 429)
+    } finally { await close() }
+})
+
+test('spoofed X-Forwarded-For prefix does not create new buckets when hops are configured', async () => {
+    const { base, close } = await startApp({ hops: 2 })
+    try {
+        for (let i = 0; i < 3; i++) assert.equal((await get(base, chain('203.0.113.50', `198.51.100.${i}`))).status, 200)
+        assert.equal((await get(base, chain('203.0.113.50', '198.51.100.99'))).status, 429)
+    } finally { await close() }
+})

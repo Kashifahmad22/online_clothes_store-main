@@ -12,7 +12,7 @@ import orderRouter from './routes/orderRoute.js'
 import storefrontSettingsRouter from './routes/storefrontSettingsRoute.js'
 import { releaseExpiredRazorpayReservations } from './controllers/razorpayController.js'
 import { configureAdminAuth } from './utils/adminCredentials.js'
-import { parseTrustProxyHops } from './utils/proxyConfig.js'
+import { resolveTrustProxyHops } from './utils/proxyConfig.js'
 import { WEBHOOK_PATH, createGeneralApiLimiter, createWebhookLimiter } from './middleware/rateLimiters.js'
 
 // App Config
@@ -55,9 +55,11 @@ if (process.env.NODE_ENV === 'production') {
 
 configureAdminAuth(process.env, { production: process.env.NODE_ENV === 'production' })
 
-const trustProxyHops = parseTrustProxyHops(process.env.TRUST_PROXY_HOPS)
+const trustProxyHops = resolveTrustProxyHops(process.env.TRUST_PROXY_HOPS, {
+    production: process.env.NODE_ENV === 'production'
+})
 if (process.env.NODE_ENV === 'production' && trustProxyHops === 0) {
-    console.warn('TRUST_PROXY_HOPS is 0: rate limits will key on the proxy address, not the client. See backend/README.md.')
+    console.warn('TRUST_PROXY_HOPS is explicitly 0: rate limits key on the direct peer address. Confirm no proxy sits in front of this service.')
 }
 app.set('trust proxy', trustProxyHops)
 

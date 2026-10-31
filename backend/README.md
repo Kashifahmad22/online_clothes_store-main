@@ -14,7 +14,7 @@ Configure these values in the backend deployment environment; never put server s
 - `CLOUDINARY_SECRET_KEY`
 - `ADMIN_EMAIL`
 - `ADMIN_PASSWORD_HASH` (bcrypt hash, cost 10-15; production refuses to start without it. The plaintext `ADMIN_PASSWORD` variable is no longer read and should be deleted.)
-- `TRUST_PROXY_HOPS` (optional integer 0-5, default 0; see below)
+- `TRUST_PROXY_HOPS` (**required in production**, integer 0-5; the server refuses to start without it. Optional in development, default 0. See below)
 - `RAZORPAY_MODE=test`
 - `RAZORPAY_KEY_ID` (test key ID beginning with `rzp_test_`)
 - `RAZORPAY_KEY_SECRET` (server only)
@@ -37,6 +37,10 @@ Store the printed value as `ADMIN_PASSWORD_HASH`. In a local `.env` file wrap it
 1. Request `GET /api/product/facets` from two different networks and compare the `RateLimit` `r=` counters; each network must decrement independently.
 2. Repeat with a forged `X-Forwarded-For: 203.0.113.9` header; the counter for your own network must keep decrementing as before (a separate counter means the value is too high).
 3. Render logs must show no `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` or `ERR_ERL_PERMISSIVE_TRUST_PROXY` messages.
+
+To establish the hop count, count the proxies between the internet and Node (for example Cloudflare, then Render's router). Confirm empirically rather than assuming: temporarily compare the `X-Forwarded-For` chain seen for a request from a known IP; the real client address must be the Nth entry from the right, where N is the value to set. Start with the lowest candidate and apply the verification steps above.
+
+Rate-limit keys are IPv6-aware (`express-rate-limit` v8 `ipKeyGenerator`): IPv6 clients are grouped by /56 subnet, so rotating addresses inside a subnet does not bypass limits. IPv4-mapped IPv6 addresses share a bucket with the IPv4 address. Counters are in memory per instance and reset on restart.
 
 The Razorpay webhook (`POST /api/order/razorpay/webhook`) is excluded from the general `/api` limiter and has its own limit of 120 requests per minute per client IP, applied before the body is read. Signature verification on the raw body and event-ID deduplication are unchanged.
 
