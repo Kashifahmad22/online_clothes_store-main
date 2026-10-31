@@ -26,5 +26,6 @@ export const defaultSiteSettings = {
   shipping: { feePaise: 5000, freeShippingThresholdPaise: null, message: '' },
   announcement: { enabled: false, text: '', url: '' },
   upcomingCategories: ['Lungis', 'Kurtis', "Other women's ethnic wear"],
-  checkout: { codAvailable: true, prepaidAvailable: false, serviceabilityCheckAvailable: false }
+  checkout: { codAvailable: true, prepaidAvailable: false, serviceabilityCheckAvailable: false },
+  siteUrl: ''
 }

@@ -2,6 +2,7 @@ import PropTypes from 'prop-types'
 import { Link } from 'react-router-dom'
 import { getProductImage } from '../utils/productDisplay'
 import MadhubaniArtwork from './MadhubaniArtwork'
+import OptimizedImage from './OptimizedImage'
 
 const Hero = ({ product, brand }) => {
   const image = product ? getProductImage(product) : null
@@ -21,7 +22,8 @@ const Hero = ({ product, brand }) => {
       </div>
       <div className={`editorial-hero__image ${image ? '' : 'editorial-hero__image--fallback'}`}>
         {image ? (
-          <img src={image.url} alt={image.altText || product.name} />
+          <OptimizedImage src={image.url} alt={image.altText || product.name} priority
+            widths={[480, 720, 960, 1280]} sizes='(min-width: 1024px) 50vw, 100vw' />
         ) : (
           <div className='editorial-hero__ornament' aria-hidden='true'>
             <span>PSH</span>

@@ -74,6 +74,32 @@ Product types `suit`, `suit-set`, and `dress` were added to the existing type en
 
 The settings document supports public brand name, tagline, description and logo URL; support contacts and hours; legal seller name, GSTIN, registered address and grievance information; social and footer links; shipping information; announcements; footer artwork selection; and upcoming categories. Optional unconfigured values should remain empty so they are not shown to customers.
 
+## SEO, social previews and sitemap
+
+Search and social metadata is derived from published products and the public storefront settings; nothing is stored separately.
+
+- `SITE_URL` (optional, Render env var) is the canonical storefront origin used in the sitemap, crawler HTML and canonical URLs. It must be an `https://` origin (http is accepted only for localhost). If it is missing or invalid, the fallback in `utils/siteUrl.js` (the current Vercel URL) is used and an invalid value logs a warning. It is also returned to the storefront as `siteUrl` in `GET /api/storefront/public`.
+- `GET /seo/product/:productId` returns lightweight HTML with Open Graph, Twitter, canonical and Product JSON-LD tags for a **published** product (by slug or ObjectId). Unknown, unpublished or malformed identifiers return a `noindex` 404 page, and database errors return 503 with `Retry-After`. Responses are `no-store`; only public product fields are used.
+- `GET /sitemap.xml` lists the home page, public storefront pages, configured policy pages, category/collection pages and published products, with `lastmod` from `updatedAt`. Every published product is included: when there are more than 5,000 URLs, `/sitemap.xml` becomes a sitemap index pointing to `/sitemaps/1`, `/sitemaps/2`, … (5,000 URLs each, well under the 50,000 protocol limit); `/sitemaps/:page` returns 404 otherwise. Responses are cached briefly in memory. Database errors return 503, never a partial or empty sitemap.
+- `frontend/vercel.json` proxies `/sitemap.xml`, `/sitemaps/:page` and, only for known social-crawler user agents (Facebook/Meta, WhatsApp, Twitter, LinkedIn, Telegram, Slack, Pinterest's crawler, Discord, Skype), `/product/:productId` to the routes above. Human visitors, in-app browsers and Googlebot continue to receive the React app (Googlebot renders JavaScript and reads the client-side tags and JSON-LD). The SPA catch-all must stay the last rewrite.
+
+**Custom-domain checklist** — when the final domain is connected:
+
+1. Set `SITE_URL` on Render to the new origin and redeploy the backend.
+2. Update the `Sitemap:` line in `frontend/public/robots.txt`.
+3. Update the backend host in the three rewrite destinations in `frontend/vercel.json` only if the Render URL changes (the CSP `connect-src` and backend `CORS` origins must also include the new storefront origin).
+
+**Post-deploy verification**
+
+```
+curl -s -A "facebookexternalhit/1.1" https://<storefront>/product/<slug> | findstr /i "og: canonical ld+json"
+curl -s -A "Mozilla/5.0" https://<storefront>/product/<slug>      # must be the normal React index.html
+curl -s -o NUL -w "%{http_code}\n" -A "WhatsApp/2" https://<storefront>/product/does-not-exist   # 404
+curl -s https://<storefront>/sitemap.xml
+```
+
+Then check a real product URL in the Facebook Sharing Debugger and by sending it in WhatsApp. Render free instances sleep when idle, so the first crawler request after a quiet period can time out and show no preview; re-sharing normally works once the service is awake.
+
 ## Legacy catalogue migration
 
 Back up the database before migrating. First report the proposed conversion without writing:

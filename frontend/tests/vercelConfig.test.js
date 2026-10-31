@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const config = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'))
-const rewrite = config.rewrites[0]
+const rewrite = config.rewrites.find(item => item.destination === '/index.html')
+const crawlerRewrite = config.rewrites.find(item => item.source === '/product/:productId')
+const crawlerPattern = new RegExp(`^${crawlerRewrite.has[0].value}$`)
 const rewritten = path => new RegExp(`^${rewrite.source}$`).test(path)
 const headers = Object.fromEntries(config.headers[0].headers.map(h => [h.key, h.value]))
 const directive = name => headers['Content-Security-Policy']
@@ -42,9 +44,46 @@ test('security headers are present', () => {
     assert.ok(headers['Referrer-Policy'])
 })
 
-test('robots.txt blocks private pages and does not invent a sitemap', () => {
+test('robots.txt blocks private pages, allows the storefront and declares the sitemap', () => {
     const robots = readFileSync(new URL('../public/robots.txt', import.meta.url), 'utf8')
     assert.match(robots, /^User-agent: \*/m)
-    assert.match(robots, /Disallow: \/cart/)
-    assert.doesNotMatch(robots, /^Sitemap:/mi)
+    assert.match(robots, /^Allow: \/$/m)
+    assert.doesNotMatch(robots, /^Disallow: \/\s*$/m)
+    for (const path of ['/cart', '/place-order', '/orders', '/login', '/verify']) {
+        assert.match(robots, new RegExp(`^Disallow: ${path}$`, 'm'))
+    }
+    assert.match(robots, /^Sitemap: https:\/\/\S+\/sitemap\.xml$/m)
+})
+
+test('social crawlers are proxied to the backend preview, ahead of the SPA rewrite', () => {
+    assert.match(crawlerRewrite.destination, /^https:\/\/patna-saree-handloom\.onrender\.com\/seo\/product\/:productId$/)
+    assert.ok(config.rewrites.indexOf(crawlerRewrite) < config.rewrites.indexOf(rewrite))
+    const crawlers = ['facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+        'WhatsApp/2.23.20.0 A', 'Twitterbot/1.0', 'LinkedInBot/1.0', 'Mozilla/5.0 (compatible; Discordbot/2.0)',
+        'meta-externalagent/1.1', 'TelegramBot (like TwitterBot)']
+    for (const agent of crawlers) assert.ok(crawlerPattern.test(agent), agent)
+})
+
+test('human browsers and search engines keep the SPA', () => {
+    const humans = ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0 Safari/537.36',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Instagram 300.0',
+        'Mozilla/5.0 (Linux; Android 13) Chrome/120 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/440.0]',
+        'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)']
+    for (const agent of humans) assert.ok(!crawlerPattern.test(agent), agent)
+})
+
+test('sitemap and sub-sitemaps are served by the backend and placed before the SPA rewrite', () => {
+    const sitemap = config.rewrites.find(item => item.source === '/sitemap.xml')
+    assert.equal(sitemap.destination, 'https://patna-saree-handloom.onrender.com/sitemap.xml')
+    assert.ok(config.rewrites.indexOf(sitemap) < config.rewrites.indexOf(rewrite))
+    const pages = config.rewrites.find(item => item.source === '/sitemaps/:page')
+    assert.equal(pages.destination, 'https://patna-saree-handloom.onrender.com/sitemaps/:page')
+    assert.ok(config.rewrites.indexOf(pages) < config.rewrites.indexOf(rewrite))
+})
+
+test('rewrite order: crawler, sitemaps, then the SPA catch-all last', () => {
+    assert.equal(config.rewrites.at(-1), rewrite)
+    assert.ok(config.rewrites.slice(0, -1).every(item => item.destination.startsWith('https://patna-saree-handloom.onrender.com/')))
+    assert.ok(!crawlerPattern.test('Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 [Pinterest/iOS]'))
+    assert.ok(crawlerPattern.test('Pinterestbot/1.0 (+http://www.pinterest.com/bot.html)'))
 })

@@ -2,6 +2,7 @@ import { useContext, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { ShopContext } from '../context/ShopContext'
 import CartTotal from '../components/CartTotal'
+import OptimizedImage from '../components/OptimizedImage'
 import { availableQuantity, getProductImage, isVariantAvailable } from '../utils/productDisplay'
 
 const Cart = () => {
@@ -59,7 +60,8 @@ const Cart = () => {
                 <article key={`${item.productId}-${item.variantId}`} className='cart-line'>
                   <Link to={product ? `/product/${product._id}` : '/collection'} className='cart-line__image'>
                     {image?.url
-                      ? <img src={image.url} alt={image.altText || product.name} />
+                      ? <OptimizedImage src={image.url} alt={image.altText || product.name}
+                          widths={[120, 240]} sizes='96px' />
                       : <span aria-hidden='true'>Image unavailable</span>}
                   </Link>
                   <div className='cart-line__details'>

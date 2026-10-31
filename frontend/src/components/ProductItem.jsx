@@ -1,6 +1,7 @@
 import PropTypes from 'prop-types'
 import { Link } from 'react-router-dom'
 import ProductPrice from './ProductPrice'
+import OptimizedImage from './OptimizedImage'
 import { getAvailableStock, getProductImage, getStartingPrice } from '../utils/productDisplay'
 
 const ProductItem = ({ product }) => {
@@ -18,11 +19,12 @@ const ProductItem = ({ product }) => {
     >
       <div className='product-card__image'>
         {image && (
-          <img
+          <OptimizedImage
             className='h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.035]'
             src={image.url}
             alt={image.altText || product.name}
-            loading='lazy'
+            widths={[240, 360, 480, 720]}
+            sizes='(min-width: 1024px) 25vw, 50vw'
           />
         )}
         {mrp && <span className='product-card__badge'>{Math.round((mrp - price) / mrp * 100)}% off</span>}

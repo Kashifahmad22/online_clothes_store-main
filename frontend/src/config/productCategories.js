@@ -1,4 +1,4 @@
-import { categorySlug } from './campaigns'
+import { categorySlug } from './campaigns.js'
 
 export const productCategories = [
   { type: 'saree', slug: 'sarees', label: 'Sarees' },

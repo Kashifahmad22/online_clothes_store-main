@@ -1,5 +1,18 @@
 {
   "rewrites": [
+    {
+      "source": "/product/:productId",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(facebookexternalhit|Facebot|WhatsApp|Twitterbot|LinkedInBot|TelegramBot|Slackbot|Pinterestbot|Discordbot|meta-externalagent|meta-externalfetcher|SkypeUriPreview).*"
+        }
+      ],
+      "destination": "https://patna-saree-handloom.onrender.com/seo/product/:productId"
+    },
+    { "source": "/sitemap.xml", "destination": "https://patna-saree-handloom.onrender.com/sitemap.xml" },
+              { "source": "/sitemaps/:page", "destination": "https://patna-saree-handloom.onrender.com/sitemaps/:page" },
     { "source": "/((?!assets/)[^.]*)", "destination": "/index.html" }
   ],
   "headers": [

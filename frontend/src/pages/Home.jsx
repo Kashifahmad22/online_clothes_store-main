@@ -4,6 +4,7 @@ import { ShopContext } from '../context/ShopContext'
 import CampaignCard from '../components/CampaignCard'
 import CollectionSection from '../components/CollectionSection'
 import Hero from '../components/Hero'
+import OptimizedImage from '../components/OptimizedImage'
 import { campaigns } from '../config/campaigns'
 import { getProductImage } from '../utils/productDisplay'
 import { availableProductCategories } from '../config/productCategories'
@@ -61,7 +62,8 @@ const Home = () => {
                   className='category-tile'
                   aria-label={`Shop ${name}`}
                 >
-                  <img src={image.url} alt={image.altText || product.name} loading='lazy' />
+                  <OptimizedImage src={image.url} alt={image.altText || product.name}
+                    widths={[240, 360, 480]} sizes='(min-width: 1024px) 25vw, 50vw' />
                   <span className='category-tile__shade' />
                   <span className='category-tile__label'>{name}<span aria-hidden='true'>↗</span></span>
                 </Link>
@@ -100,7 +102,8 @@ const Home = () => {
               return (
                 <Link key={name} to={`/collection?fabric=${encodeURIComponent(name)}`}
                   className='category-tile' aria-label={`Shop ${name} products`}>
-                  <img src={image.url} alt={image.altText || product.name} loading='lazy' />
+                  <OptimizedImage src={image.url} alt={image.altText || product.name}
+                    widths={[240, 360, 480]} sizes='(min-width: 1024px) 25vw, 50vw' />
                   <span className='category-tile__shade' />
                   <span className='category-tile__label'>{name}<span aria-hidden='true'>↗</span></span>
                 </Link>

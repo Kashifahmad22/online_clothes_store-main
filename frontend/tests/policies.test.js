@@ -4,7 +4,7 @@ import test from 'node:test'
 import { policyPages } from '../src/config/policies.js'
 
 const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'))
-const rewriteRegex = new RegExp(`^${vercel.rewrites[0].source}$`)
+const rewriteRegex = new RegExp(`^${vercel.rewrites.find(item => item.destination === '/index.html').source}$`)
 
 test('four policy pages have unique keys and paths', () => {
     assert.deepEqual(policyPages.map(page => page.key).sort(), ['privacy', 'returns', 'shipping', 'terms'])

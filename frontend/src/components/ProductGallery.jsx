@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import PropTypes from 'prop-types'
+import OptimizedImage from './OptimizedImage'
 
 const ProductGallery = ({ images, productName }) => {
   const [selectedImage, setSelectedImage] = useState(0)
@@ -31,16 +32,20 @@ const ProductGallery = ({ images, productName }) => {
             aria-pressed={selectedImage === index}
             className={`product-gallery__thumb ${selectedImage === index ? 'product-gallery__thumb--selected' : ''}`}
           >
-            <img className='h-full w-full object-cover' src={item.url} alt={item.altText || `${productName} ${item.role || 'detail'}`} />
+            <OptimizedImage className='h-full w-full object-cover' src={item.url} widths={[120, 240]} sizes='80px'
+              alt={item.altText || `${productName} ${item.role || 'detail'}`} />
           </button>
         ))}
       </div>
       <div className='product-gallery__main'>
         <button type='button' className='product-gallery__zoom-trigger' onClick={() => setZoomed(true)}
           aria-label='View product image larger'>
-          <img
+          <OptimizedImage
             className='h-full w-full object-cover'
             src={image.url}
+            widths={[480, 720, 960, 1280]}
+            sizes='(min-width: 1024px) 50vw, 100vw'
+            priority
             alt={image.altText || `${productName}${image.role ? ` - ${image.role.replace('-', ' ')}` : ''}`}
           />
           <span>Tap to enlarge</span>
@@ -51,7 +56,8 @@ const ProductGallery = ({ images, productName }) => {
           onClick={() => setZoomed(false)}>
           <button type='button' className='product-lightbox__close' onClick={() => setZoomed(false)}
             aria-label='Close enlarged image'>×</button>
-          <img src={image.url} alt={image.altText || productName} onClick={event => event.stopPropagation()} />
+          <OptimizedImage src={image.url} alt={image.altText || productName} widths={[960, 1600]} sizes='100vw'
+            onClick={event => event.stopPropagation()} />
         </div>
       )}
     </div>

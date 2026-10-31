@@ -16,7 +16,8 @@ import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import Verify from './pages/Verify'
 import Policy from './pages/Policy'
-import { policyPages, policyByPath } from './config/policies'
+import { policyPages } from './config/policies'
+import { applyPageMeta, buildPageMeta, normaliseSiteUrl } from './utils/seo'
 import { ShopContext } from './context/ShopContext'
 
 const PageMetadata = () => {
@@ -24,36 +25,12 @@ const PageMetadata = () => {
   const { siteSettings } = useContext(ShopContext)
   const brandName = siteSettings.brand.publicName
   const description = siteSettings.brand.description
+  const siteUrl = normaliseSiteUrl(siteSettings.siteUrl) || window.location.origin
   useEffect(() => {
     if (pathname.startsWith('/product/')) return
-    const titles = {
-      '/': brandName,
-      '/collection': `Shop Sarees & Ethnic Wear | ${brandName}`,
-      '/about': `About | ${brandName}`,
-      '/contact': `Contact | ${brandName}`,
-      '/cart': `Shopping Bag | ${brandName}`,
-      '/place-order': `Cash on Delivery Checkout | ${brandName}`,
-      '/orders': `Your Orders | ${brandName}`,
-      ...Object.fromEntries(policyPages.map(page => [page.path, `${page.label} | ${brandName}`])),
-      '/login': `Sign in | ${brandName}`,
-      '/verify': `Online Payment Unavailable | ${brandName}`
-    }
-    const title = pathname.startsWith('/product/')
-      ? `${brandName} | Product details`
-      : titles[pathname] || (pathname.startsWith('/collections/')
-      ? `${pathname.split('/').pop()} Collection | ${brandName}`
-      : pathname.startsWith('/category/')
-        ? `${pathname.split('/').pop()} | ${brandName}`
-        : brandName)
-    const pageDescription = policyByPath[pathname]?.description || description
-    document.title = title
-    document.querySelector('meta[name="description"]')
-      ?.setAttribute('content', pageDescription)
-    document.querySelector('meta[property="og:title"]')?.setAttribute('content', title)
-    document.querySelector('meta[property="og:description"]')?.setAttribute('content', pageDescription)
-    document.querySelector('meta[property="og:site_name"]')?.setAttribute('content', brandName)
-    document.querySelector('meta[property="og:type"]')?.setAttribute('content', 'website')
-    document.querySelector('meta[property="og:image"]')?.removeAttribute('content')
+    applyPageMeta(document, buildPageMeta({
+      pathname, brandName, description, siteUrl, image: siteSettings.brand.logoUrl || ''
+    }), brandName)
     const schema = {
       '@context': 'https://schema.org',
       '@type': 'OnlineStore',
@@ -80,7 +57,7 @@ const PageMetadata = () => {
       document.head.appendChild(structuredData)
     }
     structuredData.textContent = JSON.stringify(schema)
-  }, [brandName, description, pathname, siteSettings.legal.businessName,
+  }, [brandName, description, pathname, siteUrl, siteSettings.brand.logoUrl, siteSettings.legal.businessName,
     siteSettings.socialLinks, siteSettings.support.email, siteSettings.support.phone])
   return null
 }

@@ -1,6 +1,7 @@
 import PropTypes from 'prop-types'
 import { Link } from 'react-router-dom'
 import { getProductImage } from '../utils/productDisplay'
+import OptimizedImage from './OptimizedImage'
 
 const CampaignCard = ({ campaign, product }) => {
   const image = getProductImage(product)
@@ -11,11 +12,12 @@ const CampaignCard = ({ campaign, product }) => {
       to={`/collections/${campaign.slug}`}
       className={`campaign-card campaign-card--${campaign.slug} group relative isolate flex aspect-[4/3] items-end overflow-hidden text-white sm:aspect-[5/3]`}
     >
-      <img
+      <OptimizedImage
         src={image.url}
         alt={image.altText || product.name}
+        widths={[480, 720, 960]}
+        sizes='(min-width: 1024px) 33vw, 100vw'
         className='absolute inset-0 -z-20 h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.035]'
-        loading='lazy'
       />
       <div className='campaign-card__shade absolute inset-0 -z-10' />
       <div className='campaign-card__copy p-4 sm:p-6'>

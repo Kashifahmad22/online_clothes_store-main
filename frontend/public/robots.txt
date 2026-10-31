@@ -5,3 +5,6 @@ Disallow: /place-order
 Disallow: /orders
 Disallow: /login
 Disallow: /verify
+
+# Update this absolute URL when the custom domain is connected.
+Sitemap: https://frontend-omega-red-85.vercel.app/sitemap.xml

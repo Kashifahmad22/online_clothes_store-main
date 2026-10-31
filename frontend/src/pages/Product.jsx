@@ -6,6 +6,7 @@ import ProductGallery from '../components/ProductGallery'
 import ProductPrice from '../components/ProductPrice'
 import RelatedProducts from '../components/RelatedProducts'
 import { availableQuantity, isVariantAvailable } from '../utils/productDisplay'
+import { applyPageMeta, buildProductJsonLd, buildProductMeta, normaliseSiteUrl, setJsonLd } from '../utils/seo'
 
 const detailLabels = {
   fabric: 'Fabric',
@@ -107,20 +108,14 @@ const Product = () => {
 
   useEffect(() => {
     if (!product) return
-    document.title = product.seo?.title || `${product.name} | ${siteSettings.brand.publicName}`
-    const description = product.seo?.description || product.description
-    const metaDescription = document.querySelector('meta[name="description"]')
-    if (metaDescription && description) metaDescription.setAttribute('content', description.slice(0, 320))
-    document.querySelector('meta[property="og:title"]')?.setAttribute('content', document.title)
-    document.querySelector('meta[property="og:description"]')
-      ?.setAttribute('content', (description || '').slice(0, 320))
-    document.querySelector('meta[property="og:type"]')?.setAttribute('content', 'product')
-    const primaryImage = productImages.find(image => image.role === 'primary') || productImages[0]
-    if (primaryImage?.url) {
-      document.querySelector('meta[property="og:image"]')
-        ?.setAttribute('content', primaryImage.url)
+    const options = {
+      siteUrl: normaliseSiteUrl(siteSettings.siteUrl) || window.location.origin,
+      brandName: siteSettings.brand.publicName
     }
-  }, [product, productImages, siteSettings.brand.publicName])
+    applyPageMeta(document, buildProductMeta(product, options), options.brandName)
+    setJsonLd(document, 'psh-product-structured-data', buildProductJsonLd(product, options))
+    return () => setJsonLd(document, 'psh-product-structured-data', null)
+  }, [product, siteSettings.siteUrl, siteSettings.brand.publicName])
 
   if (loading) return <p className='py-20 text-center text-sm text-stone-600'>Loading product details…</p>
   if (error || !product) {

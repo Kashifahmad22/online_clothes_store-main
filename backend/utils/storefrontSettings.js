@@ -1,3 +1,5 @@
+import { getSiteUrl } from "./siteUrl.js";
+
 const invalidInput = message => Object.assign(new Error(message), { status: 400 });
 const groups = new Set(["shop", "support", "policies"]);
 export const POLICY_KEYS = ["privacy", "terms", "shipping", "returns"];
@@ -191,6 +193,7 @@ export const toPublicStorefrontSettings = (settings, { prepaidAvailable = false 
         shipping: source.shipping,
         announcement: source.announcement,
         upcomingCategories: source.upcomingCategories,
-        checkout: { codAvailable: true, prepaidAvailable, serviceabilityCheckAvailable: false }
+        checkout: { codAvailable: true, prepaidAvailable, serviceabilityCheckAvailable: false },
+        siteUrl: getSiteUrl()
     };
 };
