@@ -126,27 +126,119 @@ summary:focus-visible {
 }
 
 .announcement-bar {
-  display: flex;
-  min-height: 29px;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  background: var(--wine-dark);
+  position: relative;
+  border-bottom: 1px solid rgba(211, 180, 128, .55);
+  background: linear-gradient(90deg, #2b0e18 0%, #4a1727 50%, #2b0e18 100%);
   color: #f7ead6;
-  font-size: 10px;
-  letter-spacing: .12em;
-  text-transform: uppercase;
+  overflow: hidden;
 }
 
-.announcement-bar__divider {
-  color: #d3b480;
-  font-size: 9px;
+/* Matches the rendered bar height (viewport + 1px border) so settings loading causes no shift. */
+.announcement-bar-placeholder {
+  height: 33px;
 }
 
-.announcement-bar__link {
+.announcement-bar::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(211, 180, 128, .5), transparent);
+  content: "";
+}
+
+.announcement-bar__viewport {
+  display: flex;
+  height: 32px;
+  align-items: center;
+  overflow: hidden;
   color: inherit;
-  text-decoration-color: rgba(247, 234, 214, .55);
-  text-underline-offset: 3px;
+  text-decoration: none;
+  font-family: Prata, Georgia, serif;
+  font-size: 11px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+}
+
+.announcement-bar__viewport:focus-visible {
+  outline-offset: -3px;
+}
+
+.announcement-bar__track {
+  display: flex;
+  width: max-content;
+  flex: none;
+  white-space: nowrap;
+  animation: announcement-marquee var(--marquee-duration, 60s) linear infinite;
+  will-change: transform;
+}
+
+.announcement-bar__group {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+
+.announcement-bar__item {
+  display: inline-flex;
+  align-items: center;
+}
+
+.announcement-bar__separator {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  margin: 0 22px;
+  color: #d3b480;
+}
+
+/* The track holds two identical groups; moving by exactly one group (-50%) loops with no jump. */
+@keyframes announcement-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.announcement-bar:hover .announcement-bar__track,
+.announcement-bar:focus-within .announcement-bar__track {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Static state: one line showing the first message. All messages remain in the screen-reader text. */
+  .announcement-bar .announcement-bar__viewport {
+    justify-content: center;
+    padding: 0 16px;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .announcement-bar__track {
+    width: auto;
+    min-width: 0;
+    max-width: 100%;
+    flex: 0 1 auto;
+    animation: none;
+    will-change: auto;
+  }
+
+  .announcement-bar__group:last-child,
+  .announcement-bar__item--repeat,
+  .announcement-bar__item:not(:first-child),
+  .announcement-bar__separator {
+    display: none;
+  }
+
+  .announcement-bar__group,
+  .announcement-bar__item {
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+
+  .announcement-bar__item > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 .header-main {
@@ -1691,9 +1783,24 @@ summary:focus-visible {
 }
 
 @media (max-width: 767px) {
+  .announcement-bar-placeholder {
+    height: 44px;
+  }
+
+  /* One fixed 44px height for linked and unlinked bars; the gold rule is inset so it adds no extra pixel. */
   .announcement-bar {
-    min-height: 27px;
-    font-size: 9px;
+    border-bottom: 0;
+    box-shadow: inset 0 -1px 0 rgba(211, 180, 128, .55);
+  }
+
+  .announcement-bar__viewport {
+    height: 44px;
+    font-size: 10px;
+    letter-spacing: .14em;
+  }
+
+  .announcement-bar__separator {
+    margin: 0 16px;
   }
 
   .header-main {
@@ -2088,4 +2195,261 @@ summary:focus-visible {
     animation: none;
     stroke-dashoffset: 0;
   }
+}
+
+/* Phase 5: cart and checkout */
+.cart-line__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  margin-top: 12px;
+}
+
+.qty-stepper {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid #d9cdbd;
+  background: var(--ivory);
+}
+
+.qty-stepper button,
+.qty-stepper input {
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--wine-dark);
+  font-size: 16px;
+  text-align: center;
+}
+
+.qty-stepper input {
+  width: 52px;
+  min-width: 0;
+  border-inline: 1px solid #d9cdbd;
+  -moz-appearance: textfield;
+}
+
+.qty-stepper input::-webkit-outer-spin-button,
+.qty-stepper input::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+.qty-stepper button:disabled,
+.qty-stepper input:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+.cart-line .cart-line__remove {
+  position: static;
+  min-height: 44px;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.cart-line__total {
+  margin: 2px 0 0;
+  color: var(--wine-dark);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.checkout-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+  align-items: start;
+  gap: clamp(24px, 5vw, 64px);
+}
+
+.checkout-form__fields {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.checkout-heading {
+  margin: 0 0 4px;
+  padding: 0;
+  color: var(--wine-dark);
+  font-size: clamp(22px, 3vw, 28px);
+}
+
+.checkout-subheading {
+  margin: 0 0 8px;
+  color: var(--ink-soft, #5c4f49);
+  font-size: 14px;
+}
+
+.checkout-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.checkout-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.checkout-field label {
+  color: #4f443a;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.checkout-field input {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid #cdbfae;
+  background: #fff;
+  padding: 10px 12px;
+  font-size: 16px;
+}
+
+.checkout-field input[readonly] {
+  background: #efe9df;
+  color: #6b6054;
+}
+
+.checkout-field input[aria-invalid='true'] {
+  border-color: #9b2c2c;
+}
+
+.checkout-field small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.checkout-field .checkout-field__error {
+  color: #9b2c2c;
+}
+
+.checkout-summary {
+  padding: 22px;
+  border: 1px solid var(--line);
+  background: #f4eee4;
+}
+
+.checkout-summary fieldset {
+  min-width: 0;
+  margin-inline: 0;
+  padding: 0;
+  border: 0;
+}
+
+.checkout-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 56px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid #d9cdbd;
+  background: #fff;
+  cursor: pointer;
+}
+
+.checkout-option--selected {
+  border-color: var(--wine);
+  box-shadow: inset 0 0 0 1px var(--wine);
+}
+
+.checkout-option input {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+}
+
+.checkout-option span {
+  display: grid;
+  gap: 2px;
+  font-size: 14px;
+}
+
+.checkout-option small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .checkout-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .checkout-summary {
+    padding: 18px;
+  }
+
+  .cart-line__total {
+    grid-column: 2;
+  }
+
+  .cart-line__details {
+    padding-right: 0;
+  }
+}
+
+@media (max-width: 360px) {
+  .checkout-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Phase 5.5: 44px touch targets for inline text links */
+.text-link,
+.product-breadcrumb,
+.cart-summary__continue,
+.crumb-link,
+.brand-note__trust a,
+.footer-links a,
+.footer-brand__lockup,
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+.header-icon-button {
+  width: 44px;
+  height: 44px;
+}
+
+.footer-links {
+  gap: 0;
+}
+
+.nav-link,
+.header-actions > button:not(.header-icon-button),
+.collection-filters button,
+.search-panel__close {
+  display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+}
+
+.collection-filters select,
+.collection-filters input,
+.collection-filters .catalogue-apply-button {
+  min-height: 44px;
+}
+
+.crumb-link {
+  padding-right: 4px;
+  min-width: 44px;
+}
+
+.footer-links a {
+  display: flex;
+}
+
+.cart-summary__continue {
+  display: flex;
+  justify-content: center;
 }

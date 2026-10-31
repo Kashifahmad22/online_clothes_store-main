@@ -5,7 +5,7 @@ import { ShopContext } from '../context/ShopContext'
 import ProductGallery from '../components/ProductGallery'
 import ProductPrice from '../components/ProductPrice'
 import RelatedProducts from '../components/RelatedProducts'
-import { availableQuantity, isVariantAvailable } from '../utils/productDisplay'
+import { availableQuantity, isVariantAvailable, remainingQuantity, validatePurchaseQuantity } from '../utils/productDisplay'
 import { applyPageMeta, buildProductJsonLd, buildProductMeta, normaliseSiteUrl, setJsonLd } from '../utils/seo'
 
 const detailLabels = {
@@ -43,7 +43,8 @@ const detailLabels = {
 
 const Product = () => {
   const { productId } = useParams()
-  const { getProductById, addToCart, siteSettings } = useContext(ShopContext)
+  const { getProductById, updateQuantity, cartItems, navigate, siteSettings } = useContext(ShopContext)
+  const [quantity, setQuantity] = useState('1')
   const [product, setProduct] = useState(null)
   const [variantId, setVariantId] = useState('')
   const [loading, setLoading] = useState(true)
@@ -89,10 +90,16 @@ const Product = () => {
     return () => observer.disconnect()
   }, [productId])
 
+  useEffect(() => { setQuantity('1') }, [variantId, productId])
+
   const selectedVariant = product?.variants?.find(variant => variant._id === variantId)
   const price = selectedVariant?.price ?? product?.price
   const mrp = Number.isFinite(product?.mrp) && product.mrp > price ? product.mrp : null
   const isAvailable = isVariantAvailable(selectedVariant)
+  const inCart = cartItems[product?._id]?.[variantId] || 0
+  const remaining = remainingQuantity(selectedVariant, inCart)
+  const quantityCheck = validatePurchaseQuantity(quantity, selectedVariant, inCart)
+  const canAdd = isAvailable && quantityCheck.valid
   const productImages = useMemo(() => [...(product?.images || [])]
     .sort((a, b) => {
       if (a.role === 'primary') return -1
@@ -128,17 +135,32 @@ const Product = () => {
   }
 
   const addSelectedToCart = async () => {
-    if (addingToCart) return
+    if (addingToCart) return false
     if (!selectedVariant || !isVariantAvailable(selectedVariant)) {
       toast.error('This option is currently unavailable.')
-      return
+      return false
+    }
+    const check = validatePurchaseQuantity(quantity, selectedVariant, inCart)
+    if (!check.valid) {
+      toast.info(check.error)
+      return false
     }
     setAddingToCart(true)
     try {
-      await addToCart(product._id, selectedVariant._id)
+      const added = await updateQuantity(product._id, selectedVariant._id, inCart + check.quantity)
+      if (added) setQuantity('1')
+      return added
     } finally {
       setAddingToCart(false)
     }
+  }
+
+  const buyNow = async () => {
+    if (inCart > 0 && remaining < 1) {
+      navigate('/place-order')
+      return
+    }
+    if (await addSelectedToCart()) navigate('/place-order')
   }
 
   return (
@@ -147,6 +169,7 @@ const Product = () => {
         <ProductGallery key={product._id} images={productImages} productName={product.name} />
 
         <section className='product-info pb-20 md:pb-0'>
+          <Link to='/' className='product-breadcrumb'>Home <span aria-hidden='true'>/</span> </Link>
           <Link to='/collection' className='product-breadcrumb'>Shop <span aria-hidden='true'>/</span> {product.category}</Link>
           <p className='product-kicker'>
             {product.productType === 'saree' ? 'Saree' : product.category}
@@ -189,14 +212,40 @@ const Product = () => {
             {isAvailable ? `In stock · ${availableQuantity(selectedVariant)} available` : 'Currently out of stock'}
           </p>
 
+          {isAvailable && (
+            <div className='mt-4'>
+              <label className='flex items-center gap-3 text-sm font-medium text-stone-900'>
+                <span>Quantity</span>
+                <input type='text' inputMode='numeric' pattern='[0-9]*' autoComplete='off'
+                  value={quantity} disabled={remaining < 1}
+                  aria-invalid={!quantityCheck.valid && remaining > 0}
+                  aria-describedby='product-quantity-note'
+                  className='min-h-11 w-20 border border-stone-300 bg-white px-2 text-center disabled:opacity-50'
+                  onChange={event => setQuantity(event.target.value)} />
+              </label>
+              <p id='product-quantity-note' role={!quantityCheck.valid && remaining > 0 ? 'alert' : undefined}
+                className={`mt-1 text-xs ${!quantityCheck.valid && remaining > 0 ? 'text-red-800' : 'text-stone-600'}`}>
+                {!quantityCheck.valid && remaining > 0
+                  ? quantityCheck.error
+                  : inCart > 0 ? `${inCart} already in your cart. You can add up to ${remaining} more.` : ''}
+              </p>
+            </div>
+          )}
+
           <button
             type='button'
-            disabled={!isAvailable || addingToCart}
+            disabled={!canAdd || addingToCart}
             onClick={addSelectedToCart}
             className='button button--wine mt-5 hidden min-h-12 w-full uppercase tracking-wide disabled:cursor-not-allowed disabled:bg-stone-400 sm:block'
           >
-            {addingToCart ? 'Adding…' : isAvailable ? 'Add to cart' : 'Unavailable'}
+            {addingToCart ? 'Adding…' : !isAvailable ? 'Unavailable' : remaining < 1 ? 'Maximum quantity in cart' : 'Add to cart'}
           </button>
+          {isAvailable && (
+            <button type='button' disabled={addingToCart} onClick={buyNow}
+              className='mt-3 hidden min-h-12 w-full border border-rose-950 bg-white text-sm font-semibold uppercase tracking-wide text-rose-950 disabled:opacity-50 sm:block'>
+              Buy now
+            </button>
+          )}
 
           {typeof product.details?.blousePieceIncluded === 'boolean' && (
             <p className='blouse-note mt-5 p-4 text-sm text-stone-800'>
@@ -228,12 +277,20 @@ const Product = () => {
 
       {!footerVisible && (
         <div className='product-sticky-cart fixed inset-x-0 bottom-0 z-30 p-3 sm:hidden'>
-          <div className='mx-auto flex max-w-7xl items-center justify-between gap-3'>
+          <div className='mx-auto flex max-w-7xl items-center justify-between gap-2'>
             <ProductPrice price={price} mrp={mrp} compact />
-            <button type='button' disabled={!isAvailable || addingToCart} onClick={addSelectedToCart}
-              className='min-h-11 flex-1 bg-rose-950 px-4 text-sm font-semibold uppercase text-white disabled:bg-stone-400'>
-              {addingToCart ? 'Adding…' : isAvailable ? 'Add to cart' : 'Out of stock'}
-            </button>
+            <div className='flex flex-1 justify-end gap-2'>
+              <button type='button' disabled={!canAdd || addingToCart} onClick={addSelectedToCart}
+                className='min-h-11 flex-1 bg-rose-950 px-2 text-xs font-semibold uppercase text-white disabled:bg-stone-400'>
+                {addingToCart ? 'Adding…' : !isAvailable ? 'Out of stock' : remaining < 1 ? 'In cart' : 'Add to cart'}
+              </button>
+              {isAvailable && (
+                <button type='button' disabled={addingToCart} onClick={buyNow}
+                  className='min-h-11 flex-1 border border-rose-950 bg-white px-2 text-xs font-semibold uppercase text-rose-950 disabled:opacity-50'>
+                  Buy now
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

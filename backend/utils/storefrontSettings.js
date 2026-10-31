@@ -4,6 +4,14 @@ const invalidInput = message => Object.assign(new Error(message), { status: 400 
 const groups = new Set(["shop", "support", "policies"]);
 export const POLICY_KEYS = ["privacy", "terms", "shipping", "returns"];
 export const MAX_POLICY_LENGTH = 10000;
+export const MAX_ANNOUNCEMENT_LENGTH = 180;
+export const MAX_ANNOUNCEMENT_MESSAGES = 8;
+export const DEFAULT_ANNOUNCEMENT_TEXT = [
+    "DIWALI SALE IS LIVE",
+    "DISCOVER THE FESTIVE COLLECTION",
+    "ELEGANT SAREES & ETHNIC WEAR",
+    "THE ART OF INDIAN ETHNIC WEAR"
+].join(" | ");
 
 const emptyPolicies = () => Object.fromEntries(POLICY_KEYS.map(key => [key, ""]));
 
@@ -33,8 +41,48 @@ export const defaultStorefrontSettings = {
     ],
     socialLinks: [],
     shipping: { feePaise: 5000, freeShippingThresholdPaise: null, message: "" },
-    announcement: { enabled: false, text: "", url: "" },
+    announcement: { enabled: true, text: DEFAULT_ANNOUNCEMENT_TEXT, url: "" },
     upcomingCategories: ["Lungis", "Kurtis", "Other women's ethnic wear"]
+};
+
+const emptyAnnouncement = () => ({ enabled: false, text: "", url: "" });
+
+// Allow-list so internal or future fields on the stored object are never published.
+const toPublicAnnouncement = value => ({
+    ...emptyAnnouncement(),
+    ...(value && typeof value === "object"
+        ? { enabled: value.enabled === true, text: value.text || "", url: value.url || "" }
+        : {})
+});
+
+// Messages are separated by "|"; the storefront renders them as a continuous ticker.
+const parseAnnouncement = value => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw invalidInput("Announcement settings must be an object.");
+    }
+    if (typeof value.enabled !== "boolean") {
+        throw invalidInput("Announcement enabled must be true or false.");
+    }
+    const text = cleanText(value.text ?? "", "Announcement text", MAX_ANNOUNCEMENT_LENGTH)
+        .replace(/[\u0000-\u001f\u007f]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    const messages = text.split("|").map(message => message.trim()).filter(Boolean);
+    if (messages.length > MAX_ANNOUNCEMENT_MESSAGES) {
+        throw invalidInput(`Announcement can contain no more than ${MAX_ANNOUNCEMENT_MESSAGES} messages.`);
+    }
+    if (value.enabled && messages.length === 0) {
+        throw invalidInput("Announcement text is required when the announcement is enabled.");
+    }
+    const joined = messages.join(" | ");
+    if (joined.length > MAX_ANNOUNCEMENT_LENGTH) {
+        throw invalidInput(`Announcement text cannot exceed ${MAX_ANNOUNCEMENT_LENGTH} characters.`);
+    }
+    return {
+        enabled: value.enabled,
+        text: joined,
+        url: cleanUrl(value.url ?? "", "Announcement URL", { internal: true })
+    };
 };
 
 const cleanText = (value, label, maximum, optional = true) => {
@@ -79,10 +127,9 @@ export const parseStorefrontSettings = raw => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
         throw invalidInput("Storefront settings are required.");
     }
-    const { brand, support, legal, footerLinks, socialLinks, shipping, announcement, upcomingCategories } = raw;
+    const { brand, support, legal, footerLinks, socialLinks, shipping, upcomingCategories } = raw;
     for (const [value, label] of [
-        [brand, "Brand"], [support, "Support"], [legal, "Legal information"],
-        [shipping, "Shipping"], [announcement, "Announcement"]
+        [brand, "Brand"], [support, "Support"], [legal, "Legal information"], [shipping, "Shipping"]
     ]) {
         if (!value || typeof value !== "object" || Array.isArray(value)) {
             throw invalidInput(`${label} settings are required.`);
@@ -91,10 +138,6 @@ export const parseStorefrontSettings = raw => {
     if (!["madhubani", "none"].includes(brand.footerArtwork)) {
         throw invalidInput("Footer artwork must be Madhubani or none.");
     }
-    if (typeof announcement.enabled !== "boolean") {
-        throw invalidInput("Announcement enabled must be true or false.");
-    }
-
     const phone = cleanText(support.phone, "Support phone", 30);
     const whatsapp = cleanText(support.whatsapp, "WhatsApp number", 20);
     const email = cleanText(support.email, "Support email", 254).toLowerCase();
@@ -119,13 +162,11 @@ export const parseStorefrontSettings = raw => {
         (!Number.isSafeInteger(freeShippingThresholdPaise) || freeShippingThresholdPaise < 1)) {
         throw invalidInput("Free-shipping threshold must be a positive whole number of paise.");
     }
-    if (announcement.enabled && !cleanText(announcement.text, "Announcement text", 180, false)) {
-        throw invalidInput("Announcement text is required when the announcement is enabled.");
-    }
 
     return {
-        // Omitted when the client does not send it, so an older admin build cannot erase saved policies.
+        // Omitted when the client does not send them, so an older admin build cannot erase saved values.
         ...(raw.policies === undefined ? {} : { policies: parsePolicies(raw.policies) }),
+        ...(raw.announcement === undefined ? {} : { announcement: parseAnnouncement(raw.announcement) }),
         brand: {
             publicName: cleanText(brand.publicName, "Public brand name", 100, false),
             tagline: cleanText(brand.tagline, "Brand tagline", 160),
@@ -169,11 +210,6 @@ export const parseStorefrontSettings = raw => {
             freeShippingThresholdPaise,
             message: cleanText(shipping.message, "Shipping message", 240)
         },
-        announcement: {
-            enabled: announcement.enabled,
-            text: cleanText(announcement.text, "Announcement text", 180),
-            url: cleanUrl(announcement.url, "Announcement URL", { internal: true })
-        },
         upcomingCategories: cleanList(upcomingCategories, "Upcoming categories", 12,
             category => cleanText(category, "Upcoming category", 60, false))
     };
@@ -191,7 +227,7 @@ export const toPublicStorefrontSettings = (settings, { prepaidAvailable = false 
         footerLinks: source.footerLinks,
         socialLinks: source.socialLinks,
         shipping: source.shipping,
-        announcement: source.announcement,
+        announcement: toPublicAnnouncement(source.announcement),
         upcomingCategories: source.upcomingCategories,
         checkout: { codAvailable: true, prepaidAvailable, serviceabilityCheckAvailable: false },
         siteUrl: getSiteUrl()

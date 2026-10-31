@@ -13,10 +13,10 @@ const Hero = ({ product, brand }) => {
         <p className='eyebrow'>PSH Sarees & Ethnic Wear</p>
         <h1>Indian artistry, styled for the way you celebrate.</h1>
         <p className='editorial-hero__description'>
-          Explore sarees and ethnic wear with product details shown as provided.
+          Sarees, suits and ethnic wear with fabric, colour and care details shown as provided.
         </p>
         <Link to='/collection' className='button button--gold'>
-          Shop now <span aria-hidden='true'>↗</span>
+          Explore the collection <span aria-hidden='true'>↗</span>
         </Link>
         <span className='editorial-hero__note'>{brand.tagline}</span>
       </div>

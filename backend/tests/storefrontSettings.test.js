@@ -37,8 +37,71 @@ test("rejects invalid Indian contact, GST and enabled announcement data", () => 
     assert.throws(() => parseStorefrontSettings(settings), /valid 15-character/);
 
     settings.legal.gstin = "";
-    settings.announcement.enabled = true;
+    settings.announcement = { enabled: true, text: "", url: "" };
     assert.throws(() => parseStorefrontSettings(settings), /Announcement text is required/);
+});
+
+test("announcement: enabled, disabled, empty and separator-only messages", () => {
+    const enabled = parseStorefrontSettings(validSettings());
+    assert.equal(enabled.announcement.enabled, true);
+    assert.equal(enabled.announcement.text.split(" | ").length, 4);
+
+    const disabled = validSettings();
+    disabled.announcement = { enabled: false, text: "", url: "" };
+    assert.deepEqual(parseStorefrontSettings(disabled).announcement, { enabled: false, text: "", url: "" });
+
+    const separatorsOnly = validSettings();
+    separatorsOnly.announcement = { enabled: true, text: " | | ", url: "" };
+    assert.throws(() => parseStorefrontSettings(separatorsOnly), /Announcement text is required/);
+});
+
+test("announcement text is sanitised, capped and its URL restricted", () => {
+    const settings = validSettings();
+    settings.announcement = { enabled: true, text: "  One\u0000 \n|Two   words|  ", url: "/collection" };
+    assert.deepEqual(parseStorefrontSettings(settings).announcement,
+        { enabled: true, text: "One | Two words", url: "/collection" });
+
+    settings.announcement.text = "x".repeat(181);
+    assert.throws(() => parseStorefrontSettings(settings), /cannot exceed 180/);
+
+    settings.announcement.text = Array.from({ length: 9 }, (_, index) => `M${index}`).join("|");
+    assert.throws(() => parseStorefrontSettings(settings), /no more than 8 messages/);
+
+    settings.announcement.text = "Sale";
+    for (const url of ["javascript:alert(1)", "//evil.test", "http://insecure.test"]) {
+        settings.announcement.url = url;
+        assert.throws(() => parseStorefrontSettings(settings), /URL/);
+    }
+    settings.announcement = { enabled: "yes", text: "Sale", url: "" };
+    assert.throws(() => parseStorefrontSettings(settings), /true or false/);
+    settings.announcement = [];
+    assert.throws(() => parseStorefrontSettings(settings), /must be an object/);
+});
+
+test("older payloads without announcement keep the saved announcement and the result validates", async () => {
+    const legacy = validSettings();
+    delete legacy.announcement;
+    const parsed = parseStorefrontSettings(legacy);
+    assert.equal("announcement" in parsed, false);
+    await new storefrontSettingsModel(parsed).validate();
+
+    const full = parseStorefrontSettings(validSettings());
+    await new storefrontSettingsModel(full).validate();
+});
+
+test("public settings allow-list the announcement and tolerate legacy documents", () => {
+    const published = toPublicStorefrontSettings({
+        ...validSettings(),
+        announcement: { enabled: true, text: "Sale", url: "/collection", adminNote: "private" }
+    });
+    assert.deepEqual(published.announcement, { enabled: true, text: "Sale", url: "/collection" });
+
+    const legacyDocument = validSettings();
+    delete legacyDocument.announcement;
+    assert.deepEqual(toPublicStorefrontSettings(legacyDocument).announcement,
+        { enabled: false, text: "", url: "" });
+    assert.equal(toPublicStorefrontSettings({ ...validSettings(), announcement: { text: "Hi" } })
+        .announcement.enabled, false);
 });
 
 test("validates the shipping fee and only accepts a positive optional free-shipping threshold", () => {

@@ -9,6 +9,7 @@ import { campaigns, campaignBySlug, categoryFromSlug } from '../config/campaigns
 import { categoryForSlug, productCategories } from '../config/productCategories'
 
 const PAGE_SIZE = 12
+const SORTS = ['newest', 'price-asc', 'price-desc']
 const EMPTY_FACETS = { categories: [], productTypes: [], fabrics: [], colours: [], occasions: [] }
 const PRODUCT_TYPES = Object.fromEntries(productCategories.map(category => [
   category.slug,
@@ -51,7 +52,7 @@ const Collection = ({ mode = 'all' }) => {
   const queryString = searchParams.toString()
   const query = useMemo(() => new URLSearchParams(queryString), [queryString])
   const page = Math.max(1, Number(query.get('page')) || 1)
-  const sort = query.get('sort') || 'newest'
+  const sort = SORTS.includes(query.get('sort')) ? query.get('sort') : 'newest'
   const search = query.get('search') || ''
   const fabric = query.get('fabric') || ''
   const colour = query.get('colour') || ''
@@ -180,6 +181,26 @@ const Collection = ({ mode = 'all' }) => {
     ? categoryForSlug(routeCategory)?.label || category
     : productType ? PRODUCT_TYPES[Object.keys(PRODUCT_TYPES).find(key => PRODUCT_TYPES[key].value === productType)]?.label || 'Shop'
       : 'Shop sarees & ethnic wear')
+  const removeParams = keys => {
+    const next = new URLSearchParams(searchParams)
+    keys.forEach(key => next.delete(key))
+    next.delete('page')
+    setSearchParams(next)
+  }
+  const activeFilters = [
+    mode !== 'category' && productType && { key: 'productType', label: productType.replace(/-/g, ' '), clear: () => removeParams(['productType']) },
+    mode !== 'category' && category && { key: 'category', label: category, clear: () => removeParams(['category']) },
+    search && { key: 'search', label: `Search: ${search}`, clear: () => removeParams(['search']) },
+    fabric && { key: 'fabric', label: fabric, clear: () => removeParams(['fabric']) },
+    colour && { key: 'colour', label: colour, clear: () => removeParams(['colour']) },
+    occasion && { key: 'occasion', label: occasion, clear: () => removeParams(['occasion']) },
+    (minPrice || maxPrice) && {
+      key: 'price',
+      label: `₹${minPrice || '0'} – ${maxPrice ? `₹${maxPrice}` : 'any'}`,
+      clear: () => removeParams(['minPrice', 'maxPrice'])
+    },
+    availableOnly && { key: 'availableOnly', label: 'In stock', clear: () => removeParams(['availableOnly']) }
+  ].filter(Boolean)
   const headingDescription = campaign?.description || (
     mode === 'category'
       ? `Explore available ${title.toLowerCase()} from PSH.`
@@ -203,6 +224,29 @@ const Collection = ({ mode = 'all' }) => {
           <h1>{title}</h1>
           <p>{headingDescription}</p>
         </header>
+      )}
+
+      <nav aria-label='Breadcrumb' className='mt-2 flex flex-wrap items-center text-xs text-stone-600'>
+        <Link to='/' className='crumb-link underline underline-offset-2'>Home</Link>
+        <span aria-hidden='true'>&nbsp;/&nbsp;</span>
+        {title === 'Shop sarees & ethnic wear'
+          ? <span aria-current='page'>Shop</span>
+          : <><Link to='/collection' className='crumb-link underline underline-offset-2'>Shop</Link>
+            <span aria-hidden='true'>&nbsp;/&nbsp;</span><span aria-current='page'>{title}</span></>}
+      </nav>
+
+      {activeFilters.length > 0 && (
+        <ul className='mt-4 flex flex-wrap gap-2' aria-label='Active filters'>
+          {activeFilters.map(filter => (
+            <li key={filter.key}>
+              <button type='button' onClick={() => filter.clear()}
+                className='min-h-9 border border-stone-300 bg-white px-3 text-xs text-stone-800'
+                aria-label={`Remove filter ${filter.label}`}>
+                {filter.label} <span aria-hidden='true'>×</span>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
 
       <div className='collection-toolbar mt-6 flex items-center justify-between gap-3'>

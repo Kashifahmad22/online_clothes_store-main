@@ -1,4 +1,4 @@
-import { useContext, useMemo } from 'react'
+import { useContext, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ShopContext } from '../context/ShopContext'
 import CartTotal from '../components/CartTotal'
@@ -7,6 +7,17 @@ import { availableQuantity, getProductImage, isVariantAvailable } from '../utils
 
 const Cart = () => {
   const { products, productsLoading, productsError, currency, cartItems, updateQuantity, navigate } = useContext(ShopContext)
+  const [pendingLine, setPendingLine] = useState('')
+  const changeQuantity = async (item, quantity) => {
+    const key = `${item.productId}-${item.variantId}`
+    if (pendingLine) return
+    setPendingLine(key)
+    try {
+      await updateQuantity(item.productId, item.variantId, quantity)
+    } finally {
+      setPendingLine('')
+    }
+  }
   const cartData = useMemo(() => Object.entries(cartItems).flatMap(([productId, variants]) =>
     Object.entries(variants || {}).filter(([, quantity]) => quantity > 0).map(([variantId, quantity]) => ({
       productId,
@@ -56,9 +67,17 @@ const Cart = () => {
                 ? Object.values(variant.options || {}).join(' / ') || variant.sku
                 : 'Unavailable option'
               const available = isVariantAvailable(variant)
+              const maxQuantity = availableQuantity(variant)
+              const overStock = available && item.quantity > maxQuantity
+              const unitPaise = variant ? (variant.priceOverridePaise ?? product?.pricePaise) : null
+              const lineTotal = Number.isSafeInteger(unitPaise) ? unitPaise * item.quantity / 100 : null
+              const lineKey = `${item.productId}-${item.variantId}`
+              const busy = pendingLine === lineKey
+              const name = product?.name || 'unavailable item'
               return (
-                <article key={`${item.productId}-${item.variantId}`} className='cart-line'>
-                  <Link to={product ? `/product/${product._id}` : '/collection'} className='cart-line__image'>
+                <article key={lineKey} className='cart-line' aria-busy={busy}>
+                  <Link to={product ? `/product/${product.slug || product._id}` : '/collection'} className='cart-line__image'
+                    aria-label={`View ${name}`}>
                     {image?.url
                       ? <OptimizedImage src={image.url} alt={image.altText || product.name}
                           widths={[120, 240]} sizes='96px' />
@@ -68,27 +87,44 @@ const Cart = () => {
                     <h2>{product?.name || 'Product no longer available'}</h2>
                     <p className='cart-line__variant'>{optionLabel}</p>
                     {variant && <p className='cart-line__price'>{currency}{variant.price}</p>}
-                    <p className={`cart-line__stock ${available ? '' : 'cart-line__stock--unavailable'}`}>
-                      {available ? 'Available' : 'Currently unavailable'}
-                    </p>
-                    <label className='cart-line__quantity'>
-                      <span>Quantity</span>
-                      <input type='number' inputMode='numeric' min='1'
-                        max={available ? availableQuantity(variant) : undefined}
-                        value={item.quantity}
-                        disabled={!available}
-                        onChange={event => {
-                          const nextQuantity = Number(event.target.value)
-                          if (Number.isSafeInteger(nextQuantity) && nextQuantity >= 1) {
-                            updateQuantity(item.productId, item.variantId, nextQuantity)
-                          }
-                        }} />
-                    </label>
+                    {!available && <p className='cart-line__stock cart-line__stock--unavailable' role='alert'>
+                      Currently unavailable. Remove this item to continue.
+                    </p>}
+                    {overStock && (
+                      <p className='cart-line__stock cart-line__stock--unavailable' role='alert'>
+                        Only {maxQuantity} available.{' '}
+                        <button type='button' className='underline' disabled={busy}
+                          onClick={() => changeQuantity(item, maxQuantity)}>Reduce to {maxQuantity}</button>
+                      </p>
+                    )}
+                    <div className='cart-line__actions'>
+                      <div className='qty-stepper' role='group' aria-label={`Quantity for ${name}`}>
+                        <button type='button' aria-label={`Decrease quantity of ${name}`}
+                          disabled={!available || busy || item.quantity <= 1}
+                          onClick={() => changeQuantity(item, item.quantity - 1)}>−</button>
+                        <input type='number' inputMode='numeric' min='1' step='1'
+                          max={available ? maxQuantity : undefined}
+                          aria-label={`Quantity of ${name}`}
+                          value={item.quantity} disabled={!available || busy}
+                          onChange={event => {
+                            const next = Number(event.target.value)
+                            if (Number.isSafeInteger(next) && next >= 1) changeQuantity(item, next)
+                          }} />
+                        <button type='button' aria-label={`Increase quantity of ${name}`}
+                          disabled={!available || busy || item.quantity >= maxQuantity}
+                          onClick={() => changeQuantity(item, item.quantity + 1)}>+</button>
+                      </div>
+                      <button type='button' disabled={busy} onClick={() => changeQuantity(item, 0)}
+                        className='cart-line__remove' aria-label={`Remove ${name} from cart`}>
+                        Remove
+                      </button>
+                    </div>
                   </div>
-                  <button type='button' onClick={() => updateQuantity(item.productId, item.variantId, 0)}
-                    className='cart-line__remove' aria-label={`Remove ${product?.name || 'unavailable item'} from cart`}>
-                    Remove
-                  </button>
+                  {lineTotal !== null && (
+                    <p className='cart-line__total' aria-label={`Line total ${currency}${lineTotal}`}>
+                      {currency}{lineTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                    </p>
+                  )}
                 </article>
               )
             })}

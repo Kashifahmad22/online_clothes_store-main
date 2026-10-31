@@ -45,7 +45,7 @@ const STATIC_TITLES = (brandName) => ({
   '/about': `About | ${brandName}`,
   '/contact': `Contact | ${brandName}`,
   '/cart': `Shopping Bag | ${brandName}`,
-  '/place-order': `Cash on Delivery Checkout | ${brandName}`,
+  '/place-order': `Checkout | ${brandName}`,
   '/orders': `Your Orders | ${brandName}`,
   '/login': `Sign in | ${brandName}`,
   '/verify': `Online Payment Unavailable | ${brandName}`

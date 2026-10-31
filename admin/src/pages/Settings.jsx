@@ -313,8 +313,9 @@ const Settings = ({ token }) => {
             onChange={event => setNested('announcement', 'enabled', event.target.checked)} />
           Show announcement bar
         </label>
-        <label className='grid gap-1 text-sm'>Announcement text
+        <label className='grid gap-1 text-sm'>Announcement messages (scrolling banner; separate messages with | , up to 8)
           <input maxLength='180' value={settings.announcement.text}
+            placeholder='DIWALI SALE IS LIVE | DISCOVER THE FESTIVE COLLECTION'
             onChange={event => setNested('announcement', 'text', event.target.value)} />
         </label>
         <label className='grid gap-1 text-sm'>Announcement link (internal path or HTTPS URL)

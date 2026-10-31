@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import { assets } from '../assets/assets'
 import { campaigns } from '../config/campaigns'
@@ -6,14 +6,15 @@ import { getWhatsAppSupportUrl } from '../config/support'
 import { useContext } from 'react'
 import { ShopContext } from '../context/ShopContext'
 import { availableProductCategories } from '../config/productCategories'
+import AnnouncementBar from './AnnouncementBar'
 
 const Navbar = () => {
   const [menuOpen, setMenuOpen] = useState(false)
-  const { setShowSearch, getCartCount, navigate, token, setToken, setCartItems, products, siteSettings } = useContext(ShopContext)
+  const menuButtonRef = useRef(null)
+  const menuPanelRef = useRef(null)
+  const { setShowSearch, getCartCount, navigate, token, setToken, setCartItems, products, siteSettings, siteSettingsLoaded, siteSettingsError } = useContext(ShopContext)
   const brand = siteSettings.brand
   const whatsappUrl = getWhatsAppSupportUrl(siteSettings.support.whatsapp)
-  const announcementUrl = siteSettings.announcement.url
-  const isExternalAnnouncement = /^https:\/\//i.test(announcementUrl)
   const availableCategories = availableProductCategories(products)
   const activeCampaigns = campaigns.filter(campaign =>
     products.some(product => (product.collections || []).includes(campaign.collectionTag))
@@ -26,21 +27,50 @@ const Navbar = () => {
     setCartItems({})
   }
 
+  useEffect(() => {
+    if (!menuOpen) return undefined
+    const opener = menuButtonRef.current
+    const focusable = () => [...(menuPanelRef.current?.querySelectorAll('a[href], button:not([disabled])') || [])]
+    focusable()[0]?.focus()
+    const onKeyDown = event => {
+      if (event.key === 'Escape') {
+        setMenuOpen(false)
+        return
+      }
+      if (event.key !== 'Tab') return
+      const items = focusable()
+      if (items.length === 0) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    const desktop = window.matchMedia('(min-width: 1024px)')
+    const closeOnDesktop = event => { if (event.matches) setMenuOpen(false) }
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', onKeyDown)
+    desktop.addEventListener('change', closeOnDesktop)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', onKeyDown)
+      desktop.removeEventListener('change', closeOnDesktop)
+      opener?.focus()
+    }
+  }, [menuOpen])
+
   const closeMenu = () => setMenuOpen(false)
   const navClass = ({ isActive }) =>
     `nav-link whitespace-nowrap py-2 text-sm font-medium ${isActive ? 'nav-link--active' : ''}`
 
   return (
     <header className='site-header relative z-40'>
-      <div className='announcement-bar'>
-        {siteSettings.announcement.enabled && announcementUrl ? (
-          isExternalAnnouncement
-            ? <a href={announcementUrl} className='announcement-bar__link' target='_blank' rel='noreferrer'>{siteSettings.announcement.text}</a>
-            : <Link to={announcementUrl} className='announcement-bar__link'>{siteSettings.announcement.text}</Link>
-        ) : (
-          <span>{siteSettings.announcement.enabled ? siteSettings.announcement.text : brand.tagline}</span>
-        )}
-      </div>
+      <AnnouncementBar announcement={siteSettings.announcement} pending={!siteSettingsLoaded && !siteSettingsError} />
       <div className='header-main'>
         <Link to='/' onClick={closeMenu} aria-label={`${brand.publicName} home`} className='brand-lockup min-w-0'>
           {brand.logoUrl
@@ -83,7 +113,8 @@ const Navbar = () => {
               {getCartCount()}
             </span>
           </Link>
-          <button type='button' onClick={() => setMenuOpen(true)} aria-label='Open menu'
+          <button type='button' ref={menuButtonRef} onClick={() => setMenuOpen(true)} aria-label='Open menu'
+            aria-haspopup='dialog' aria-expanded={menuOpen}
             className='header-icon-button lg:hidden'>
             <img src={assets.menu_icon} className='h-5 w-5' alt='' />
           </button>
@@ -92,8 +123,10 @@ const Navbar = () => {
 
       {menuOpen && (
         <div className='fixed inset-0 z-50 bg-black/40 lg:hidden' role='presentation' onClick={closeMenu}>
-          <nav aria-label='Mobile navigation' className='mobile-menu ml-auto flex h-full w-[min(88vw,24rem)] flex-col gap-1 overflow-y-auto p-5 shadow-xl'
+          <div ref={menuPanelRef} role='dialog' aria-modal='true' aria-label='Site menu'
+            className='mobile-menu ml-auto h-full w-[min(88vw,24rem)] overflow-y-auto shadow-xl'
             onClick={event => event.stopPropagation()}>
+          <nav aria-label='Mobile navigation' className='flex min-h-full flex-col gap-1 p-5'>
             <button type='button' onClick={closeMenu} className='mb-3 min-h-11 self-end px-3 text-sm text-stone-700'>Close menu</button>
             <NavLink onClick={closeMenu} to='/collection' className='mobile-menu__link'>Shop all products</NavLink>
             {availableCategories.map(category => (
@@ -112,6 +145,7 @@ const Navbar = () => {
             {token && <button type='button' onClick={() => { logout(); closeMenu() }} className='py-3 text-left text-rose-950'>Sign out</button>}
             {whatsappUrl && <a href={whatsappUrl} target='_blank' rel='noreferrer' className='mt-4 bg-emerald-800 px-4 py-3 text-center text-sm font-semibold text-white'>WhatsApp support</a>}
           </nav>
+          </div>
         </div>
       )}
     </header>

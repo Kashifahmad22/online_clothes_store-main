@@ -73,20 +73,6 @@ const Home = () => {
         </section>
       )}
 
-      {siteSettings.upcomingCategories?.length > 0 && (
-        <section className='upcoming-categories home-section'>
-          <div className='section-heading'>
-            <div>
-              <p className='eyebrow'>Expanding the edit</p>
-              <h2>Coming soon</h2>
-            </div>
-          </div>
-          <ul>
-            {siteSettings.upcomingCategories.map(category => <li key={category}>{category}</li>)}
-          </ul>
-        </section>
-      )}
-
       {fabrics.length > 0 && (
         <section className='home-section'>
           <div className='section-heading'>
@@ -141,10 +127,10 @@ const Home = () => {
         products={latestProducts}
       />
       <CollectionSection
-        title='Customer favourites'
-        description='Products marked as bestsellers by our team.'
+        title='Featured collection'
+        description='Pieces selected by our team from the live catalogue.'
         products={bestsellers}
-        linkLabel='Browse all products'
+        linkLabel='Explore our collection'
       />
 
       {!productsLoading && !productsError && products.length === 0 && (
