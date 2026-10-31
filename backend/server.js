@@ -1,7 +1,6 @@
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
-import rateLimit from 'express-rate-limit'
 import 'dotenv/config'
 import mongoose from 'mongoose'
 import connectDB from './config/mongodb.js'
@@ -12,6 +11,9 @@ import cartRouter from './routes/cartRoute.js'
 import orderRouter from './routes/orderRoute.js'
 import storefrontSettingsRouter from './routes/storefrontSettingsRoute.js'
 import { releaseExpiredRazorpayReservations } from './controllers/razorpayController.js'
+import { configureAdminAuth } from './utils/adminCredentials.js'
+import { parseTrustProxyHops } from './utils/proxyConfig.js'
+import { WEBHOOK_PATH, createGeneralApiLimiter, createWebhookLimiter } from './middleware/rateLimiters.js'
 
 // App Config
 const app = express()
@@ -27,8 +29,6 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
 if (process.env.NODE_ENV === 'production') {
     const requiredProductionSettings = [
         'MONGODB_URI',
-        'ADMIN_EMAIL',
-        'ADMIN_PASSWORD',
         'CLOUDINARY_NAME',
         'CLOUDINARY_API_KEY',
         'CLOUDINARY_SECRET_KEY'
@@ -53,6 +53,14 @@ if (process.env.NODE_ENV === 'production') {
     }
 }
 
+configureAdminAuth(process.env, { production: process.env.NODE_ENV === 'production' })
+
+const trustProxyHops = parseTrustProxyHops(process.env.TRUST_PROXY_HOPS)
+if (process.env.NODE_ENV === 'production' && trustProxyHops === 0) {
+    console.warn('TRUST_PROXY_HOPS is 0: rate limits will key on the proxy address, not the client. See backend/README.md.')
+}
+app.set('trust proxy', trustProxyHops)
+
 // middlewares
 app.disable('x-powered-by')
 app.use(helmet())
@@ -72,17 +80,12 @@ app.use(cors({
         return callback(new Error('Origin is not allowed by CORS.'))
     }
 }))
-app.use('/api/order/razorpay/webhook', express.raw({
+app.use(WEBHOOK_PATH, createWebhookLimiter(), express.raw({
     type: 'application/json',
     limit: '1mb'
 }))
 app.use(express.json({ limit: '100kb' }))
-app.use('/api', rateLimit({
-    windowMs: 15 * 60 * 1000,
-    limit: 300,
-    standardHeaders: 'draft-8',
-    legacyHeaders: false
-}))
+app.use('/api', createGeneralApiLimiter())
 
 app.get('/health', (req, res) => {
     const databaseReady = mongoose.connection.readyState === 1

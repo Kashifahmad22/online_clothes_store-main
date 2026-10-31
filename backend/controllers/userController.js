@@ -2,6 +2,12 @@ import validator from "validator";
 import bcrypt from "bcrypt"
 import jwt from 'jsonwebtoken'
 import userModel from "../models/userModel.js";
+import {
+    MAX_PASSWORD_BYTES,
+    isAdminAuthConfigured,
+    passwordExceedsBcryptLimit,
+    verifyAdminCredentials
+} from "../utils/adminCredentials.js";
 
 
 const createToken = (id) => {
@@ -95,14 +101,17 @@ const adminLogin = async (req, res) => {
         
         const {email,password} = req.body || {}
 
-        if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) {
+        if (!isAdminAuthConfigured()) {
             return res.status(503).json({ success: false, message: "Admin sign-in is not configured." })
         }
         if (typeof email !== "string" || typeof password !== "string") {
             return res.status(400).json({ success: false, message: "Email and password are required." })
         }
+        if (passwordExceedsBcryptLimit(password)) {
+            return res.status(400).json({ success: false, message: `Password must be ${MAX_PASSWORD_BYTES} bytes or fewer.` })
+        }
 
-        if (email === process.env.ADMIN_EMAIL && password === process.env.ADMIN_PASSWORD) {
+        if (await verifyAdminCredentials(email, password)) {
             const token = jwt.sign({ role: "admin" }, process.env.JWT_SECRET, { expiresIn: "1h" });
             res.json({success:true,token})
         } else {

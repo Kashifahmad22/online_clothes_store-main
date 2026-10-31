@@ -13,11 +13,32 @@ Configure these values in the backend deployment environment; never put server s
 - `CLOUDINARY_API_KEY`
 - `CLOUDINARY_SECRET_KEY`
 - `ADMIN_EMAIL`
-- `ADMIN_PASSWORD`
+- `ADMIN_PASSWORD_HASH` (bcrypt hash, cost 10-15; production refuses to start without it. The plaintext `ADMIN_PASSWORD` variable is no longer read and should be deleted.)
+- `TRUST_PROXY_HOPS` (optional integer 0-5, default 0; see below)
 - `RAZORPAY_MODE=test`
 - `RAZORPAY_KEY_ID` (test key ID beginning with `rzp_test_`)
 - `RAZORPAY_KEY_SECRET` (server only)
 - `RAZORPAY_WEBHOOK_SECRET` (server only; configure the same value in the Razorpay test-mode webhook)
+
+### Admin password hash
+
+Generate the hash locally (the password is typed without echo; only the hash is printed, and 72 bytes is the maximum):
+
+```
+npm run hash:admin-password
+```
+
+Store the printed value as `ADMIN_PASSWORD_HASH`. In a local `.env` file wrap it in single quotes because it contains `$`. Admin sign-in allows 5 failed attempts per client IP per 15 minutes; the limit expires on its own, so there is no permanent lockout. Counters are held in memory, which is appropriate for a single instance.
+
+### Proxy trust and rate limiting
+
+`TRUST_PROXY_HOPS` is the number of proxies in front of the app whose `X-Forwarded-For` entries are trusted. It must match the real deployment: too low and every visitor shares the proxy's rate-limit bucket; too high and clients can spoof their IP by sending their own `X-Forwarded-For`. `true` is never used. Verify a candidate value after deploying it:
+
+1. Request `GET /api/product/facets` from two different networks and compare the `RateLimit` `r=` counters; each network must decrement independently.
+2. Repeat with a forged `X-Forwarded-For: 203.0.113.9` header; the counter for your own network must keep decrementing as before (a separate counter means the value is too high).
+3. Render logs must show no `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` or `ERR_ERL_PERMISSIVE_TRUST_PROXY` messages.
+
+The Razorpay webhook (`POST /api/order/razorpay/webhook`) is excluded from the general `/api` limiter and has its own limit of 120 requests per minute per client IP, applied before the body is read. Signature verification on the raw body and event-ID deduplication are unchanged.
 
 Order placement uses MongoDB transactions to make inventory decrement and order creation atomic. Use a replica-set-enabled MongoDB deployment. If transaction support is unavailable, the API fails the order rather than risking a partial stock/order update.
 
