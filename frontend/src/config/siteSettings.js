@@ -14,6 +14,7 @@ export const defaultSiteSettings = {
     sellerInformation: '',
     grievanceContact: ''
   },
+  policies: { privacy: '', terms: '', shipping: '', returns: '' },
   footerLinks: [
     { label: 'Shop all', url: '/collection', group: 'shop' },
     { label: 'Sarees', url: '/category/sarees', group: 'shop' },

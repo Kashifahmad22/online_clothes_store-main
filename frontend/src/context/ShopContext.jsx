@@ -20,6 +20,7 @@ const ShopContextProvider = (props) => {
     const [productsError, setProductsError] = useState('');
     const [siteSettings, setSiteSettings] = useState(defaultSiteSettings);
     const [siteSettingsError, setSiteSettingsError] = useState('');
+    const [siteSettingsLoaded, setSiteSettingsLoaded] = useState(false);
     const [token, setToken] = useState('')
     const guestCartRef = useRef({});
     const navigate = useNavigate();
@@ -201,6 +202,7 @@ const ShopContextProvider = (props) => {
                 throw new Error(response.data.message || 'Unable to load storefront information.');
             }
             setSiteSettings({ ...defaultSiteSettings, ...response.data.settings });
+            setSiteSettingsLoaded(true);
         } catch (error) {
             setSiteSettingsError(error.response?.data?.message || error.message ||
                 'Unable to load storefront information.');
@@ -284,7 +286,7 @@ const ShopContextProvider = (props) => {
     const value = {
         products, productsLoading, productsError, getProductById, currency,
         getCartAmountPaise, getShippingAmount,
-        siteSettings, siteSettingsError,
+        siteSettings, siteSettingsError, siteSettingsLoaded,
         search, setSearch, showSearch, setShowSearch,
         cartItems, addToCart,setCartItems, setProducts,
         getCartCount, updateQuantity,

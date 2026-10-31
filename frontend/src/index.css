@@ -1128,6 +1128,12 @@ summary:focus-visible {
   line-height: 1.8;
 }
 
+.policy-page .policy-page__paragraph {
+  max-width: 720px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
 .editorial-info-page__address {
   align-self: start;
   padding: 22px;

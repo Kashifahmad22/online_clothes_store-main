@@ -15,6 +15,8 @@ import SearchBar from './components/SearchBar'
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import Verify from './pages/Verify'
+import Policy from './pages/Policy'
+import { policyPages, policyByPath } from './config/policies'
 import { ShopContext } from './context/ShopContext'
 
 const PageMetadata = () => {
@@ -32,6 +34,7 @@ const PageMetadata = () => {
       '/cart': `Shopping Bag | ${brandName}`,
       '/place-order': `Cash on Delivery Checkout | ${brandName}`,
       '/orders': `Your Orders | ${brandName}`,
+      ...Object.fromEntries(policyPages.map(page => [page.path, `${page.label} | ${brandName}`])),
       '/login': `Sign in | ${brandName}`,
       '/verify': `Online Payment Unavailable | ${brandName}`
     }
@@ -42,11 +45,12 @@ const PageMetadata = () => {
       : pathname.startsWith('/category/')
         ? `${pathname.split('/').pop()} | ${brandName}`
         : brandName)
+    const pageDescription = policyByPath[pathname]?.description || description
     document.title = title
     document.querySelector('meta[name="description"]')
-      ?.setAttribute('content', description)
+      ?.setAttribute('content', pageDescription)
     document.querySelector('meta[property="og:title"]')?.setAttribute('content', title)
-    document.querySelector('meta[property="og:description"]')?.setAttribute('content', description)
+    document.querySelector('meta[property="og:description"]')?.setAttribute('content', pageDescription)
     document.querySelector('meta[property="og:site_name"]')?.setAttribute('content', brandName)
     document.querySelector('meta[property="og:type"]')?.setAttribute('content', 'website')
     document.querySelector('meta[property="og:image"]')?.removeAttribute('content')
@@ -98,6 +102,9 @@ const App = () => {
           <Route path='/category/:categorySlug' element={<Collection mode='category' />} />
           <Route path='/about' element={<About />} />
           <Route path='/contact' element={<Contact />} />
+          {policyPages.map(page => (
+            <Route key={page.key} path={page.path} element={<Policy policyKey={page.key} />} />
+          ))}
           <Route path='/product/:productId' element={<Product />} />
           <Route path='/cart' element={<Cart />} />
           <Route path='/login' element={<Login />} />

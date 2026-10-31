@@ -8,6 +8,7 @@ const emptySettings = {
   brand: { publicName: '', tagline: '', description: '', logoUrl: '', footerArtwork: 'madhubani' },
   support: { phone: '', whatsapp: '', email: '', businessHours: '', description: '' },
   legal: { businessName: '', gstin: '', registeredAddress: '', sellerInformation: '', grievanceContact: '' },
+  policies: { privacy: '', terms: '', shipping: '', returns: '' },
   footerLinks: [],
   socialLinks: [],
   shipping: { feePaise: 5000, freeShippingThresholdPaise: null, message: '' },
@@ -41,6 +42,7 @@ const Settings = ({ token }) => {
         brand: { ...emptySettings.brand, ...response.data.settings.brand },
         support: { ...emptySettings.support, ...response.data.settings.support },
         legal: { ...emptySettings.legal, ...response.data.settings.legal },
+        policies: { ...emptySettings.policies, ...response.data.settings.policies },
         shipping: { ...emptySettings.shipping, ...response.data.settings.shipping },
         announcement: { ...emptySettings.announcement, ...response.data.settings.announcement }
       })
@@ -229,6 +231,25 @@ const Settings = ({ token }) => {
                 value={settings.legal[field]} onChange={event => setNested('legal', field, event.target.value)} />
               : <input maxLength={field === 'gstin' ? 15 : 160} value={settings.legal[field]}
                 onChange={event => setNested('legal', field, event.target.value)} />}
+          </label>
+        ))}
+      </section>
+
+      <section className='grid gap-4 rounded border bg-white p-5'>
+        <h2 className='text-lg font-medium text-gray-900'>Store policies</h2>
+        <p className='text-sm text-gray-600'>
+          Plain text only; separate paragraphs with a blank line. A blank policy shows a
+          &quot;not published yet&quot; notice on the storefront. Have your policies reviewed before publishing.
+        </p>
+        {[
+          ['privacy', 'Privacy Policy'],
+          ['terms', 'Terms & Conditions'],
+          ['shipping', 'Shipping & Delivery Policy'],
+          ['returns', 'Returns, Exchanges & Refund Policy']
+        ].map(([field, label]) => (
+          <label key={field} className='grid gap-1 text-sm'>{label}
+            <textarea maxLength='10000' rows='8' value={settings.policies[field]}
+              onChange={event => setNested('policies', field, event.target.value)} />
           </label>
         ))}
       </section>

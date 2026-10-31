@@ -34,6 +34,12 @@ const settingsSchema = new mongoose.Schema({
         sellerInformation: { type: String, trim: true, maxlength: 500, default: "" },
         grievanceContact: { type: String, trim: true, maxlength: 300, default: "" }
     },
+    policies: {
+        privacy: { type: String, trim: true, maxlength: 10000, default: "" },
+        terms: { type: String, trim: true, maxlength: 10000, default: "" },
+        shipping: { type: String, trim: true, maxlength: 10000, default: "" },
+        returns: { type: String, trim: true, maxlength: 10000, default: "" }
+    },
     footerLinks: { type: [linkSchema], default: [] },
     socialLinks: { type: [socialLinkSchema], default: [] },
     shipping: {

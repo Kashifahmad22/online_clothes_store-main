@@ -1,7 +1,8 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 import storefrontSettingsModel from "../models/storefrontSettingsModel.js";
 import {
+    MAX_POLICY_LENGTH,
     defaultStorefrontSettings,
     parseStorefrontSettings,
     toPublicStorefrontSettings
@@ -61,4 +62,39 @@ test("keeps checkout payment capability server-derived and public output allow-l
         serviceabilityCheckAvailable: false
     });
     assert.equal("privateSecret" in publicSettings, false);
+});
+
+test("policy text is optional, validated, length-capped and omitted when not sent", async () => {
+    const withoutPolicies = validSettings();
+    delete withoutPolicies.policies;
+    assert.equal("policies" in parseStorefrontSettings(withoutPolicies), false);
+
+    const settings = validSettings();
+    settings.policies = { privacy: "  Privacy text  ", terms: "", shipping: "Shipping text" };
+    const parsed = parseStorefrontSettings(settings);
+    assert.deepEqual(parsed.policies, { privacy: "Privacy text", terms: "", shipping: "Shipping text", returns: "" });
+    await new storefrontSettingsModel(parsed).validate();
+
+    settings.policies = { privacy: "x".repeat(MAX_POLICY_LENGTH + 1) };
+    assert.throws(() => parseStorefrontSettings(settings), /privacy policy cannot exceed/);
+    settings.policies = { privacy: 5 };
+    assert.throws(() => parseStorefrontSettings(settings), /must be text/);
+    settings.policies = [];
+    assert.throws(() => parseStorefrontSettings(settings), /Policy settings must be an object/);
+});
+
+test("public settings always expose all four policy keys, empty by default, with no extras", () => {
+    const empty = toPublicStorefrontSettings(defaultStorefrontSettings);
+    assert.deepEqual(empty.policies, { privacy: "", terms: "", shipping: "", returns: "" });
+
+    const legacyDocument = validSettings();
+    delete legacyDocument.policies;
+    assert.deepEqual(toPublicStorefrontSettings(legacyDocument).policies, empty.policies);
+
+    const published = toPublicStorefrontSettings({
+        ...validSettings(),
+        policies: { privacy: "Published", adminNote: "must not be serialized" }
+    });
+    assert.equal(published.policies.privacy, "Published");
+    assert.equal(published.policies.terms, "");
 });

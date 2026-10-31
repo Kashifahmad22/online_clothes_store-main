@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { campaigns } from '../config/campaigns'
 import { useContext } from 'react'
 import { ShopContext } from '../context/ShopContext'
+import { policyPages } from '../config/policies'
 import { getWhatsAppSupportUrl } from '../config/support'
 import { availableProductCategories } from '../config/productCategories'
 import MadhubaniArtwork from './MadhubaniArtwork'
@@ -20,7 +21,13 @@ const Footer = () => {
   const whatsappUrl = getWhatsAppSupportUrl(support.whatsapp)
   const shopLinks = siteSettings.footerLinks.filter(link => link.group === 'shop')
   const supportLinks = siteSettings.footerLinks.filter(link => link.group === 'support')
-  const policyLinks = siteSettings.footerLinks.filter(link => link.group === 'policies')
+  const configuredPolicyLinks = siteSettings.footerLinks.filter(link => link.group === 'policies')
+  const configuredPolicyUrls = new Set(configuredPolicyLinks.map(link => link.url))
+  const policyLinks = [
+    ...policyPages.filter(page => !configuredPolicyUrls.has(page.path))
+      .map(page => ({ label: page.label, url: page.path })),
+    ...configuredPolicyLinks
+  ]
   const categories = availableProductCategories(products)
   const listedShopUrls = new Set(shopLinks.map(link => link.url))
   const availableCategoryLinks = categories.filter(category => !listedShopUrls.has(`/category/${category.slug}`))

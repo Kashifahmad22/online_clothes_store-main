@@ -1,5 +1,9 @@
 const invalidInput = message => Object.assign(new Error(message), { status: 400 });
 const groups = new Set(["shop", "support", "policies"]);
+export const POLICY_KEYS = ["privacy", "terms", "shipping", "returns"];
+export const MAX_POLICY_LENGTH = 10000;
+
+const emptyPolicies = () => Object.fromEntries(POLICY_KEYS.map(key => [key, ""]));
 
 export const defaultStorefrontSettings = {
     brand: {
@@ -17,6 +21,7 @@ export const defaultStorefrontSettings = {
         sellerInformation: "",
         grievanceContact: ""
     },
+    policies: { privacy: "", terms: "", shipping: "", returns: "" },
     footerLinks: [
         { label: "Shop all", url: "/collection", group: "shop" },
         { label: "Sarees", url: "/category/sarees", group: "shop" },
@@ -56,6 +61,16 @@ const cleanList = (value, label, maximumItems, parseItem) => {
         throw invalidInput(`${label} must contain no more than ${maximumItems} entries.`);
     }
     return value.map(parseItem);
+};
+
+const parsePolicies = value => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw invalidInput("Policy settings must be an object.");
+    }
+    return Object.fromEntries(POLICY_KEYS.map(key => [
+        key,
+        cleanText(value[key] ?? "", `${key} policy`, MAX_POLICY_LENGTH)
+    ]));
 };
 
 export const parseStorefrontSettings = raw => {
@@ -107,6 +122,8 @@ export const parseStorefrontSettings = raw => {
     }
 
     return {
+        // Omitted when the client does not send it, so an older admin build cannot erase saved policies.
+        ...(raw.policies === undefined ? {} : { policies: parsePolicies(raw.policies) }),
         brand: {
             publicName: cleanText(brand.publicName, "Public brand name", 100, false),
             tagline: cleanText(brand.tagline, "Brand tagline", 160),
@@ -168,6 +185,7 @@ export const toPublicStorefrontSettings = (settings, { prepaidAvailable = false 
         brand: source.brand,
         support: source.support,
         legal: source.legal,
+        policies: { ...emptyPolicies(), ...(source.policies || {}) },
         footerLinks: source.footerLinks,
         socialLinks: source.socialLinks,
         shipping: source.shipping,
