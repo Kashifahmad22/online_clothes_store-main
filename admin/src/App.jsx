@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import Navbar from './components/Navbar'
 import Sidebar from './components/Sidebar'
 import { Routes, Route } from 'react-router-dom'
@@ -7,19 +7,34 @@ import List from './pages/List'
 import Orders from './pages/Orders'
 import Settings from './pages/Settings'
 import Login from './components/Login'
-import { ToastContainer } from 'react-toastify';
+import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import axios from 'axios'
+import { readAdminToken, shouldEndSession, writeAdminToken } from './utils/adminSession'
 
 export const backendUrl = import.meta.env.VITE_BACKEND_URL
 export const currency = '₹'
 
 const App = () => {
 
-  const [token, setToken] = useState(localStorage.getItem('token')?localStorage.getItem('token'):'');
+  const [token, setToken] = useState(readAdminToken);
 
   useEffect(()=>{
-    localStorage.setItem('token',token)
+    writeAdminToken(token)
   },[token])
+
+  // An expired or rejected admin token on any API call returns the user to the sign-in screen.
+  // Layout effects run before child pages' fetch effects, so the very first request is covered.
+  useLayoutEffect(() => {
+    const id = axios.interceptors.response.use(response => response, error => {
+      if (shouldEndSession(error)) {
+        setToken('')
+        toast.error('Your admin session has ended. Please sign in again.', { toastId: 'session-ended' })
+      }
+      return Promise.reject(error)
+    })
+    return () => axios.interceptors.response.eject(id)
+  }, [])
 
   return (
     <div className='bg-gray-50 min-h-screen'>
