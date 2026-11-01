@@ -1,12 +1,16 @@
 import axios from 'axios'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
 import { Link } from 'react-router-dom'
 import { backendUrl, currency } from '../App'
 import { toast } from 'react-toastify'
+import { statusButtons, statusConfirmMessage, statusLabel } from '../utils/productStatus'
+import { availableStock } from '../utils/stockAdjustment'
 
 const List = ({ token }) => {
   const [list, setList] = useState([])
+  const [busyId, setBusyId] = useState('')
+  const busyRef = useRef(false)
 
   const fetchList = useCallback(async () => {
     try {
@@ -18,18 +22,25 @@ const List = ({ token }) => {
     }
   }, [token])
 
-  const updateStatus = async (product, status) => {
+  const updateStatus = async (product, button) => {
+    if (busyRef.current) return
+    if (button.confirm && !window.confirm(statusConfirmMessage(button.action, product.name))) return
+    busyRef.current = true
+    setBusyId(product._id)
     try {
       const response = await axios.patch(
         `${backendUrl}/api/product/${product._id}/status`,
-        { status },
+        { status: button.action },
         { headers: { token } }
       )
       if (!response.data.success) throw new Error(response.data.message)
-      toast.success(`Product ${status}.`)
+      toast.success(`Product moved to ${statusLabel(button.action)}.`)
       await fetchList()
     } catch (error) {
       toast.error(error.response?.data?.message || error.message || 'Unable to update product.')
+    } finally {
+      busyRef.current = false
+      setBusyId('')
     }
   }
 
@@ -59,22 +70,18 @@ const List = ({ token }) => {
             <p>{currency}{(product.pricePaise / 100).toFixed(2)}</p>
             <div className='text-xs'>
               {product.variants?.map(variant => (
-                <p key={variant._id}>{variant.sku}: {variant.stockOnHand - variant.reserved} available</p>
+                <p key={variant._id}>{variant.sku}{variant.active === false ? ' (inactive)' : ''}: {availableStock(variant)} available</p>
               ))}
             </div>
             <div className='flex flex-col gap-1'>
-              <span>{product.status}</span>
-              <button onClick={() => updateStatus(
-                product,
-                product.status === 'published' ? 'draft' : 'published'
-              )} className='underline text-left text-xs'>
-                {product.status === 'published' ? 'Unpublish' : 'Publish'}
-              </button>
-              {product.status !== 'archived' && (
-                <button onClick={() => updateStatus(product, 'archived')} className='underline text-left text-xs'>
-                  Archive
+              <span>{statusLabel(product.status)}</span>
+              {statusButtons(product.status).map(button => (
+                <button key={button.action} type='button' disabled={busyId === product._id}
+                  onClick={() => updateStatus(product, button)}
+                  className='underline text-left text-xs disabled:opacity-40'>
+                  {busyId === product._id ? 'Working…' : button.label}
                 </button>
-              )}
+              ))}
             </div>
           </div>
         ))}

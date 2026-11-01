@@ -1,4 +1,5 @@
 import PropTypes from 'prop-types'
+import { confirmLeave } from '../utils/unsavedChanges'
 
 const Navbar = ({setToken}) => {
   return (
@@ -10,7 +11,7 @@ const Navbar = ({setToken}) => {
             <p className='text-xs text-gray-500'>Store administration</p>
           </div>
         </div>
-        <button onClick={()=>setToken('')} className='bg-gray-600 text-white px-5 py-2 sm:px-7 sm:py-2 rounded-full text-xs sm:text-sm'>Logout</button>
+        <button onClick={()=>{ if (confirmLeave()) setToken('') }} className='bg-gray-600 text-white px-5 py-2 sm:px-7 sm:py-2 rounded-full text-xs sm:text-sm'>Logout</button>
     </div>
   )
 }

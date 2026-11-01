@@ -12,6 +12,10 @@ import {
 } from "../utils/catalogueValidation.js";
 import { parseCatalogueQuery } from "../utils/catalogueQuery.js";
 import { resolveBadgeFlags } from "../utils/merchandising.js";
+import { buildStockAdjustment, parseStockAdjustment, toStockSummary } from "../utils/stockAdjustment.js";
+import { assertStatusTransition, resolveStatusForEdit } from "../utils/productStatus.js";
+import { planVariantChanges } from "../utils/variantPlan.js";
+import { buildProductUpdate } from "../utils/productUpdate.js";
 
 const respondError = (res, error) => {
     if (error.status) {
@@ -56,47 +60,22 @@ const clearTempFiles = async (files = []) => {
     })));
 };
 
+const applyVariantPlan = async (product, plan, session) => {
+    for (const change of plan.updates) {
+        const update = {};
+        if (Object.keys(change.set).length > 0) update.$set = change.set;
+        if (Object.keys(change.unset).length > 0) update.$unset = change.unset;
+        if (Object.keys(update).length === 0) continue;
+        await productVariantModel.updateOne({ _id: change.id }, update, { session });
+    }
+    for (const data of plan.creates) {
+        await productVariantModel.create([{ ...data, productId: product._id }], { session });
+    }
+};
+
 const attachVariants = async (product, variants, session) => {
     const docs = await productVariantModel.find({ productId: product._id }).session(session);
-    const currentBySku = new Map(docs.map(item => [item.sku, item]));
-    const incomingSkus = new Set(variants.map(item => item.sku.trim().toUpperCase()));
-
-    for (const oldVariant of docs) {
-        if (!incomingSkus.has(oldVariant.sku)) {
-            await productVariantModel.updateOne(
-                { _id: oldVariant._id },
-                { $set: { active: false } },
-                { session }
-            );
-        }
-    }
-
-    for (const variant of variants) {
-        const sku = variant.sku.trim().toUpperCase();
-        const data = {
-            productId: product._id,
-            sku,
-            options: variant.options || {},
-            priceOverridePaise: variant.priceOverridePaise,
-            stockOnHand: variant.stockOnHand,
-            lowStockThreshold: Number.isSafeInteger(variant.lowStockThreshold)
-                ? variant.lowStockThreshold
-                : 2,
-            active: variant.active !== false
-        };
-        const existing = currentBySku.get(sku);
-        if (existing) {
-            if (variant.stockOnHand < existing.reserved) {
-                throw Object.assign(
-                    new Error(`Stock cannot be lower than reserved quantity for SKU ${sku}.`),
-                    { status: 400 }
-                );
-            }
-            await productVariantModel.updateOne({ _id: existing._id }, { $set: data }, { session });
-        } else {
-            await productVariantModel.create([data], { session });
-        }
-    }
+    await applyVariantPlan(product, planVariantChanges(docs, variants), session);
 };
 
 const createSlug = value => value.trim().toLowerCase()
@@ -129,6 +108,9 @@ const addProduct = async (req, res) => {
     const files = req.files || [];
     try {
         const payload = parseProductPayload(req.body.product);
+        if (payload.status === "archived") {
+            return res.status(400).json({ success: false, message: "A new product cannot be created as archived." });
+        }
         const uploadedImages = await uploadImages(files, req.body.imageRoles);
         const images = [...(payload.images || []), ...uploadedImages]
             .map((image, index) => ({
@@ -158,7 +140,7 @@ const addProduct = async (req, res) => {
                     subCategory: payload.subCategory || "",
                     collections: payload.collections || [],
                     pricePaise: payload.pricePaise,
-                    mrpPaise: payload.mrpPaise,
+                    mrpPaise: payload.mrpPaise ?? undefined,
                     images,
                     details: payload.details || {},
                     status: payload.status === "published" ? "published" : "draft",
@@ -203,28 +185,23 @@ const updateProduct = async (req, res) => {
         if (images.length === 0) {
             return res.status(400).json({ success: false, message: "At least one product image is required." });
         }
-        validatePublishableProduct(payload, images);
+        const status = resolveStatusForEdit(product.status, payload.status);
+        const existingVariants = await productVariantModel.find({ productId: product._id });
+        const plan = planVariantChanges(existingVariants, payload.variants);
+        validatePublishableProduct(
+            { ...payload, status, variants: plan.activeCount > 0 ? [{ active: true }] : [] },
+            images
+        );
 
         const session = await productModel.startSession();
         try {
             await session.withTransaction(async () => {
-                await productModel.updateOne({ _id: product._id }, { $set: {
-                    name: payload.name.trim(),
-                    slug: payload.slug?.trim().toLowerCase() || product.slug,
-                    description: payload.description.trim(),
-                    productType: payload.productType,
-                    category: payload.category.trim(),
-                    subCategory: payload.subCategory || "",
-                    collections: payload.collections || [],
-                    pricePaise: payload.pricePaise,
-                    mrpPaise: payload.mrpPaise,
-                    images,
-                    details: payload.details || {},
-                    status: payload.status === "published" ? "published" : "draft",
-                    ...resolveBadgeFlags(payload, product),
-                    seo: payload.seo || {}
-                } }, { runValidators: true, session });
-                await attachVariants(product, payload.variants, session);
+                await productModel.updateOne(
+                    { _id: product._id },
+                    buildProductUpdate({ payload, product, images, status }),
+                    { runValidators: true, session }
+                );
+                await applyVariantPlan(product, plan, session);
             });
         } finally {
             await session.endSession();
@@ -394,7 +371,8 @@ const updateProductStatus = async (req, res) => {
         }
         const current = await productModel.findById(req.params.productId);
         if (!current) return res.status(404).json({ success: false, message: "Product not found." });
-        if (status === "published") {
+        assertStatusTransition(current.status, status);
+        if (status === "published" && current.status !== "published") {
             if (!Array.isArray(current.images) || current.images.length === 0) {
                 return res.status(400).json({ success: false, message: "Add at least one product image before publishing." });
             }
@@ -425,4 +403,32 @@ const updateProductStatus = async (req, res) => {
     }
 };
 
-export { addProduct, listProducts, listCatalogueFacets, listAdminProducts, singleProduct, updateProduct, updateProductStatus };
+const adjustStock = async (req, res) => {
+    try {
+        const { productId, variantId } = req.params;
+        if (!isValidObjectId(productId) || !isValidObjectId(variantId)) {
+            return res.status(400).json({ success: false, message: "Invalid product or variant ID." });
+        }
+        const { operation, delta, reason } = parseStockAdjustment(req.body);
+        const { filter, update } = buildStockAdjustment(productId, variantId, delta);
+        const updated = await productVariantModel.findOneAndUpdate(filter, update, { new: true });
+        if (!updated) {
+            const exists = await productVariantModel.findOne({ _id: variantId, productId });
+            if (!exists) return res.status(404).json({ success: false, message: "Variant not found." });
+            return res.status(409).json({
+                success: false,
+                message: delta < 0
+                    ? "Stock cannot be reduced below the quantity reserved for pending payments."
+                    : "Stock on hand would exceed the supported maximum."
+            });
+        }
+        console.info("[stock-adjustment]", JSON.stringify({
+            productId, sku: updated.sku, operation, delta, reason, at: new Date().toISOString()
+        }));
+        return res.json({ success: true, message: "Stock updated.", variant: toStockSummary(updated) });
+    } catch (error) {
+        return respondError(res, error);
+    }
+};
+
+export { addProduct, adjustStock, listProducts, listCatalogueFacets, listAdminProducts, singleProduct, updateProduct, updateProductStatus };

@@ -1,6 +1,7 @@
 import express from "express";
 import {
     addProduct,
+    adjustStock,
     listCatalogueFacets,
     listAdminProducts,
     listProducts,
@@ -20,5 +21,6 @@ productRouter.get("/:productId", singleProduct);
 productRouter.post("/add", adminAuth, upload.array("images", 12), addProduct);
 productRouter.put("/:productId", adminAuth, upload.array("images", 12), updateProduct);
 productRouter.patch("/:productId/status", adminAuth, updateProductStatus);
+productRouter.patch("/:productId/variants/:variantId/stock", adminAuth, adjustStock);
 
 export default productRouter;

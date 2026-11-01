@@ -2,10 +2,11 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
-import { BrowserRouter } from 'react-router-dom'
+import { RouterProvider, createBrowserRouter } from 'react-router-dom'
+
+// A data router is required for useBlocker, which also intercepts the browser Back/Forward buttons.
+const router = createBrowserRouter([{ path: '*', element: <App /> }])
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <BrowserRouter>
-    <App />
-  </BrowserRouter>,
+  <RouterProvider router={router} />,
 )

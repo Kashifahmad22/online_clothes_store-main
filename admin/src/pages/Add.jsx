@@ -1,10 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import PropTypes from 'prop-types'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useBlocker, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { backendUrl } from '../App'
 import { HIGHLIGHT_OPTIONS, applyHighlight, highlightFromProduct } from '../utils/productHighlight'
+import StockAdjuster from '../components/StockAdjuster'
+import { isArchived, statusLabel } from '../utils/productStatus'
+import { setUnsavedChanges, hasUnsavedChanges, LEAVE_MESSAGE } from '../utils/unsavedChanges'
+
+// Saved SKUs are tracked by id; stock figures change only through the stock endpoint, so they are not "edits".
+const formSnapshot = (product, collectionTags) => JSON.stringify({
+  product: {
+    ...product,
+    variants: (product.variants || []).map(variant => {
+      if (!variant._id) return variant
+      const copy = { ...variant }
+      delete copy.stockOnHand
+      delete copy.reserved
+      return copy
+    })
+  },
+  collectionTags
+})
 
 const blankProduct = () => ({
   name: '',
@@ -75,6 +93,37 @@ const Add = ({ token }) => {
   const [uploads, setUploads] = useState([])
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
+  const [restoring, setRestoring] = useState(false)
+  const [baseline, setBaseline] = useState(() => formSnapshot(blankProduct(), ''))
+  const isDirty = uploads.length > 0 || formSnapshot(product, collectionTags) !== baseline
+
+  useEffect(() => {
+    setUnsavedChanges(isDirty)
+    if (!isDirty) return undefined
+    const warn = event => {
+      event.preventDefault()
+      event.returnValue = LEAVE_MESSAGE
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [isDirty])
+
+  useEffect(() => () => setUnsavedChanges(false), [])
+
+  // Covers in-app links and the browser Back/Forward buttons. The module flag (not React state) is read
+  // so that a successful save, which clears it just before navigating, is never blocked.
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    hasUnsavedChanges() &&
+    (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search))
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return
+    if (window.confirm(LEAVE_MESSAGE)) {
+      setUnsavedChanges(false)
+      blocker.proceed()
+    } else {
+      blocker.reset()
+    }
+  }, [blocker])
 
   const previews = useMemo(() => uploads.map(item => ({
     ...item,
@@ -87,6 +136,7 @@ const Add = ({ token }) => {
     if (!editId) {
       setProduct(blankProduct())
       setCollectionTags('')
+      setBaseline(formSnapshot(blankProduct(), ''))
       return
     }
 
@@ -97,7 +147,7 @@ const Add = ({ token }) => {
           toast.error('Product not found.')
           return
         }
-        setProduct({
+        const loaded = {
           ...blankProduct(),
           ...found,
           price: (found.pricePaise / 100).toFixed(2),
@@ -105,14 +155,17 @@ const Add = ({ token }) => {
           details: { ...blankProduct().details, ...found.details },
           variants: found.variants?.map(variant => ({
             ...variant,
-            priceOverride: variant.priceOverridePaise === undefined
+            priceOverride: variant.priceOverridePaise == null
               ? ''
               : (variant.priceOverridePaise / 100).toFixed(2),
             options: variant.options || {}
           })) || [],
           images: found.images || []
-        })
-        setCollectionTags((found.collections || []).join(', '))
+        }
+        const tags = (found.collections || []).join(', ')
+        setProduct(loaded)
+        setCollectionTags(tags)
+        setBaseline(formSnapshot(loaded, tags))
       })
       .catch(() => toast.error('Unable to load product for editing.'))
   }, [editId, token])
@@ -181,9 +234,9 @@ const Add = ({ token }) => {
     if (savingRef.current) return
 
     const pricePaise = paiseFromRupees(product.price)
-    const mrpPaise = product.mrp === '' ? undefined : paiseFromRupees(product.mrp)
+    const mrpPaise = product.mrp === '' ? null : paiseFromRupees(product.mrp)
     if (!Number.isSafeInteger(pricePaise) || pricePaise < 0 ||
-      (mrpPaise !== undefined && (!Number.isSafeInteger(mrpPaise) || mrpPaise < pricePaise))) {
+      (mrpPaise !== null && (!Number.isSafeInteger(mrpPaise) || mrpPaise < pricePaise))) {
       toast.error('Enter a valid price and MRP in rupees.')
       return
     }
@@ -244,7 +297,7 @@ const Add = ({ token }) => {
       if (variant.priceOverride === '' || variant.priceOverride === undefined) return false
       const override = paiseFromRupees(variant.priceOverride)
       return !Number.isSafeInteger(override) || override < 0 ||
-        (mrpPaise !== undefined && override > mrpPaise)
+        (mrpPaise !== null && override > mrpPaise)
     })) {
       toast.error('Enter a valid variant price no greater than the product MRP.')
       return
@@ -264,8 +317,8 @@ const Add = ({ token }) => {
       variants: product.variants.map(variant => ({
         ...variant,
         stockOnHand: Number(variant.stockOnHand),
-        priceOverridePaise: variant.priceOverride === ''
-          ? undefined
+        priceOverridePaise: variant.priceOverride === '' || variant.priceOverride === undefined
+          ? null
           : paiseFromRupees(variant.priceOverride)
       }))
     }
@@ -298,6 +351,7 @@ const Add = ({ token }) => {
         setCollectionTags('')
         setUploads([])
       }
+      setUnsavedChanges(false)
       navigate('/list')
     } catch (error) {
       const message = error.response?.data?.message ||
@@ -309,6 +363,43 @@ const Add = ({ token }) => {
       savingRef.current = false
       setSaving(false)
     }
+  }
+
+  const restoreToDraft = async () => {
+    if (restoring || savingRef.current || !editId) return
+    setRestoring(true)
+    try {
+      const response = await axios.patch(
+        `${backendUrl}/api/product/${editId}/status`,
+        { status: 'draft' },
+        { headers: { token } }
+      )
+      if (!response.data.success) throw new Error(response.data.message)
+      setProduct(current => ({ ...current, status: 'draft' }))
+      setBaseline(current => {
+        const parsed = JSON.parse(current)
+        parsed.product.status = 'draft'
+        return JSON.stringify(parsed)
+      })
+      toast.success('Product restored to Draft. It is not published.')
+    } catch (error) {
+      toast.error(error.response?.data?.message || error.message || 'Unable to restore product.')
+    } finally {
+      setRestoring(false)
+    }
+  }
+
+  const applyStockSummary = summary => setProduct(current => ({
+    ...current,
+    variants: current.variants.map(variant => variant._id === summary._id
+      ? { ...variant, stockOnHand: summary.stockOnHand, reserved: summary.reserved }
+      : variant)
+  }))
+
+  const deactivateVariant = index => {
+    const variant = product.variants[index]
+    if (!window.confirm(`Deactivate SKU ${variant.sku}? It will stop being sold once you save. Order history and stock records are kept, and you can reactivate it later.`)) return
+    setVariant(index, 'active', false)
   }
 
   const setExistingImageRole = (index, role) => setProduct(current => ({
@@ -363,12 +454,23 @@ const Add = ({ token }) => {
             <input min='0' step='0.01' type='number' value={product.mrp}
               onChange={event => setField('mrp', event.target.value)} className='px-3 py-2' />
           </label>
-          <label className='grid gap-1'>Status
-            <select value={product.status} onChange={event => setField('status', event.target.value)} className='px-3 py-2'>
-              <option value='draft'>Draft</option>
-              <option value='published'>Published</option>
-            </select>
-          </label>
+          <div className='grid gap-1'>Status
+            {isArchived(product.status) ? (
+              <div className='flex flex-wrap items-center gap-2'>
+                <span className='px-3 py-2 border bg-gray-100'>{statusLabel('archived')}</span>
+                <button type='button' onClick={restoreToDraft} disabled={restoring || saving}
+                  className='border px-3 py-2 disabled:opacity-40'>
+                  {restoring ? 'Restoring…' : 'Restore to Draft'}
+                </button>
+                <span className='text-xs text-gray-500'>Restoring keeps the product hidden until you publish it.</span>
+              </div>
+            ) : (
+              <select value={product.status} onChange={event => setField('status', event.target.value)} className='px-3 py-2'>
+                <option value='draft'>Draft</option>
+                <option value='published'>Published</option>
+              </select>
+            )}
+          </div>
         </div>
       </section>
 
@@ -441,16 +543,26 @@ const Add = ({ token }) => {
 
       <section className='w-full grid gap-3'>
         <h2 className='font-medium'>Inventory and SKU</h2>
-        {product.variants.map((variant, index) => (
-          <div key={index} className='flex flex-wrap gap-3 items-end'>
+        {product.variants.map((variant, index) => {
+          const saved = Boolean(variant._id)
+          const inactive = variant.active === false
+          return (
+          <div key={variant._id || index} className={`grid gap-2 border p-2 ${inactive ? 'bg-gray-50' : ''}`}>
+          <div className='flex flex-wrap gap-3 items-end'>
             <label className='grid gap-1'>SKU
-              <input required value={variant.sku} onChange={event => setVariant(index, 'sku', event.target.value)}
-                className='px-3 py-2' />
+              <input required readOnly={saved} value={variant.sku} onChange={event => setVariant(index, 'sku', event.target.value)}
+                className={`px-3 py-2 ${saved ? 'bg-gray-100 text-gray-600' : ''}`} />
             </label>
-            <label className='grid gap-1'>Stock on hand
-              <input required min='0' step='1' type='number' value={variant.stockOnHand}
-                onChange={event => setVariant(index, 'stockOnHand', event.target.value)} className='px-3 py-2' />
-            </label>
+            {saved ? (
+              <span className={`px-2 py-1 text-xs border ${inactive ? 'text-gray-600' : 'text-green-800'}`}>
+                {inactive ? 'Inactive' : 'Active'}
+              </span>
+            ) : (
+              <label className='grid gap-1'>Initial stock
+                <input required min='0' step='1' type='number' value={variant.stockOnHand}
+                  onChange={event => setVariant(index, 'stockOnHand', event.target.value)} className='px-3 py-2' />
+              </label>
+            )}
             <label className='grid gap-1'>Price override (₹, optional)
               <input min='0' step='0.01' type='number' value={variant.priceOverride || ''}
                 onChange={event => setVariant(index, 'priceOverride', event.target.value)} className='px-3 py-2' />
@@ -465,11 +577,26 @@ const Add = ({ token }) => {
                 onChange={event => setVariantOption(index, 'value', event.target.value)}
                 className='px-3 py-2' placeholder='Red / Standard' />
             </label>
-            <button type='button' disabled={product.variants.length === 1}
-              onClick={() => setProduct(current => ({ ...current, variants: current.variants.filter((_, i) => i !== index) }))}
-              className='border px-3 py-2 disabled:opacity-40'>Remove SKU</button>
+            {saved ? (
+              inactive ? (
+                <button type='button' onClick={() => setVariant(index, 'active', true)}
+                  className='border px-3 py-2'>Reactivate SKU</button>
+              ) : (
+                <button type='button' onClick={() => deactivateVariant(index)}
+                  className='border px-3 py-2'>Deactivate SKU</button>
+              )
+            ) : (
+              <button type='button' disabled={product.variants.length === 1}
+                onClick={() => setProduct(current => ({ ...current, variants: current.variants.filter((_, i) => i !== index) }))}
+                className='border px-3 py-2 disabled:opacity-40'>Remove new SKU</button>
+            )}
           </div>
-        ))}
+          {saved && editId && (
+            <StockAdjuster token={token} productId={editId} variant={variant} onUpdated={applyStockSummary} />
+          )}
+          </div>
+          )
+        })}
         <button type='button' onClick={() => setProduct(current => ({
           ...current,
           variants: [...current.variants, { sku: '', stockOnHand: 0, options: {} }]

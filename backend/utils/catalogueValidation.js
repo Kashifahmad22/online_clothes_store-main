@@ -34,7 +34,7 @@ export const parseProductPayload = (raw) => {
     if (!Number.isSafeInteger(product.pricePaise) || product.pricePaise < 0) {
         throw invalidInput("Price must be a non-negative integer amount in paise.");
     }
-    if (product.mrpPaise !== undefined &&
+    if (product.mrpPaise !== undefined && product.mrpPaise !== null &&
         (!Number.isSafeInteger(product.mrpPaise) || product.mrpPaise < product.pricePaise)) {
         throw invalidInput("MRP must be an integer amount in paise and not less than the selling price.");
     }
@@ -47,8 +47,8 @@ export const parseProductPayload = (raw) => {
         (!product.details || typeof product.details !== "object" || Array.isArray(product.details))) {
         throw invalidInput("Product details must be a key/value object.");
     }
-    if (product.status !== undefined && !["draft", "published"].includes(product.status)) {
-        throw invalidInput("Product status must be draft or published.");
+    if (product.status !== undefined && !    ["draft", "published", "archived"].includes(product.status)) {
+            throw invalidInput("Product status must be draft, published, or archived.");
     }
     if (product.bestseller !== undefined && typeof product.bestseller !== "boolean") {
         throw invalidInput("Bestseller must be true or false.");
@@ -91,12 +91,12 @@ export const parseProductPayload = (raw) => {
         if (!Number.isSafeInteger(variant.stockOnHand) || variant.stockOnHand < 0) {
             throw invalidInput("Variant stock must be a non-negative whole number.");
         }
-        if (variant.priceOverridePaise !== undefined &&
+        if (variant.priceOverridePaise !== undefined && variant.priceOverridePaise !== null &&
             (!Number.isSafeInteger(variant.priceOverridePaise) || variant.priceOverridePaise < 0)) {
             throw invalidInput("Variant price must be a non-negative integer amount in paise.");
         }
-        if (product.mrpPaise !== undefined &&
-            variant.priceOverridePaise !== undefined &&
+        if (typeof product.mrpPaise === "number" &&
+            typeof variant.priceOverridePaise === "number" &&
             variant.priceOverridePaise > product.mrpPaise) {
             throw invalidInput("Variant price cannot exceed the product MRP.");
         }
