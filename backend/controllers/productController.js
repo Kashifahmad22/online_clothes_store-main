@@ -11,8 +11,17 @@ import {
     validatePublishableProduct
 } from "../utils/catalogueValidation.js";
 import { parseCatalogueQuery } from "../utils/catalogueQuery.js";
-import { buildPagination, isAdminProductId, parseAdminCatalogueQuery } from "../utils/adminCatalogueQuery.js";
-import { resolveBadgeFlags } from "../utils/merchandising.js";
+import { resolveBadgeFlags, availableUnits, stockState, startingPricePaise } from "../utils/merchandising.js";
+import {
+    buildAdminPricePipeline,
+    buildAdminProductFilter,
+    buildPagination,
+    filterIdsByStockState,
+    isAdminProductId,
+    isPriceSort,
+    parseAdminCatalogueQuery,
+    searchPattern
+} from "../utils/adminCatalogueQuery.js";
 import { buildStockAdjustment, parseStockAdjustment, toStockSummary } from "../utils/stockAdjustment.js";
 import { assertStatusTransition, resolveStatusForEdit } from "../utils/productStatus.js";
 import { planVariantChanges } from "../utils/variantPlan.js";
@@ -338,18 +347,79 @@ const listCatalogueFacets = async (req, res) => {
     }
 };
 
+const adminStockSummary = product => {
+    const active = product.variants.filter(variant => variant.active !== false);
+    return {
+        availableUnits: availableUnits(product.variants),
+        activeVariantCount: active.length,
+        inactiveVariantCount: product.variants.length - active.length,
+        state: stockState(product.variants)
+    };
+};
+
+// Resolves every filter to a single Mongo filter, so the page and the total always agree.
+const resolveAdminFilter = async query => {
+    let skuProductIds = [];
+    if (query.search) {
+        skuProductIds = await productVariantModel.distinct("productId", { sku: searchPattern(query.search) });
+    }
+    const filter = buildAdminProductFilter(query, skuProductIds);
+    if (!query.stock) return filter;
+
+    // Stock lives on variants and the rule is the storefront's isLowStock, so evaluate it in JS over
+    // the active variants of the candidate products only (ids and stock figures, not full documents).
+    const candidates = await productModel.find(filter).select("_id").lean();
+    const ids = candidates.map(item => item._id);
+    const variants = ids.length === 0 ? [] : await productVariantModel
+        .find({ productId: { $in: ids }, active: true })
+        .select("productId stockOnHand reserved lowStockThreshold active")
+        .lean();
+    const matching = filterIdsByStockState(ids, variants, query.stock, stockState);
+    return { $and: [filter, { _id: { $in: matching } }] };
+};
+
 const listAdminProducts = async (req, res) => {
     try {
         const query = parseAdminCatalogueQuery(req.query);
-        const [totalProducts, products] = await Promise.all([
-            productModel.countDocuments({}),
-            productModel.find({}).sort(query.sort).skip(query.skip).limit(query.limit)
-        ]);
+        const filter = await resolveAdminFilter(query);
+        let pageQuery;
+        let pageProducts;
+        const totalPromise = productModel.countDocuments(filter);
+        if (isPriceSort(query.sortKey)) {
+            const ordered = await productModel.aggregate(
+                buildAdminPricePipeline(filter, query, productVariantModel.collection.name)
+            );
+            const ids = ordered.map(item => item._id);
+            const docs = ids.length ? await productModel.find({ _id: { $in: ids } }) : [];
+            const byId = new Map(docs.map(doc => [String(doc._id), doc]));
+            pageProducts = ids.map(id => byId.get(String(id))).filter(Boolean);
+        } else {
+            pageQuery = productModel.find(filter).sort(query.sort);
+            if (query.collation) pageQuery = pageQuery.collation(query.collation);
+            pageProducts = pageQuery.skip(query.skip).limit(query.limit);
+        }
+        const [totalProducts, products] = await Promise.all([totalPromise, pageProducts]);
+        const shaped = await getProductsWithVariants(products, true);
         return res.json({
             success: true,
-            products: await getProductsWithVariants(products, true),
+            products: shaped.map(product => ({
+                ...product,
+                stockSummary: adminStockSummary(product),
+                startingPricePaise: startingPricePaise(product.pricePaise, product.variants)
+            })),
             pagination: buildPagination({ page: query.page, limit: query.limit, totalProducts })
         });
+    } catch (error) {
+        return respondError(res, error);
+    }
+};
+
+const listAdminCategories = async (req, res) => {
+    try {
+        const categories = (await productModel.distinct("category"))
+            .filter(value => typeof value === "string" && value.trim() !== "")
+            .sort((a, b) => a.localeCompare(b));
+        return res.json({ success: true, categories });
     } catch (error) {
         return respondError(res, error);
     }
@@ -451,4 +521,4 @@ const adjustStock = async (req, res) => {
     }
 };
 
-export { addProduct, adjustStock, adminSingleProduct, listProducts, listCatalogueFacets, listAdminProducts, singleProduct, updateProduct, updateProductStatus };
+export { addProduct, adjustStock, adminSingleProduct, listAdminCategories, listProducts, listCatalogueFacets, listAdminProducts, singleProduct, updateProduct, updateProductStatus };

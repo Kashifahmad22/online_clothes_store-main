@@ -32,3 +32,30 @@ export const isLowStock = variants => {
     }
     return available > 0 && available < threshold;
 };
+
+// Customer-available units: active variants only, on hand minus reserved, never negative.
+// A variant with unreliable figures contributes nothing, matching isLowStock's refusal to trust them.
+export const availableUnits = variants => (Array.isArray(variants) ? variants : [])
+    .filter(variant => variant && variant.active !== false)
+    .reduce((total, variant) => {
+        const reserved = variant.reserved ?? 0;
+        if (!wholeNumber(variant.stockOnHand) || !wholeNumber(reserved)) return total;
+        return total + Math.max(0, variant.stockOnHand - reserved);
+    }, 0);
+
+// out-of-stock: nothing available (including no active variants); low-stock: isLowStock; otherwise in-stock.
+export const stockState = variants => {
+    if (availableUnits(variants) === 0) return "out-of-stock";
+    return isLowStock(variants) ? "low-stock" : "in-stock";
+};
+
+// The storefront's "from" price: the lowest price among purchasable variants (active, with available
+// stock), where a variant without an override uses the base price. With none purchasable it is the base.
+export const startingPricePaise = (basePaise, variants) => {
+    const prices = (Array.isArray(variants) ? variants : [])
+        .filter(variant => variant && variant.active !== false &&
+            (Number(variant.stockOnHand) || 0) - (Number(variant.reserved) || 0) > 0)
+        .map(variant => variant.priceOverridePaise ?? basePaise)
+        .filter(price => Number.isFinite(price));
+    return prices.length ? Math.min(...prices) : basePaise;
+};

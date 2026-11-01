@@ -4,15 +4,21 @@ import PropTypes from 'prop-types'
 import { Link, useSearchParams } from 'react-router-dom'
 import { backendUrl, currency } from '../App'
 import { toast } from 'react-toastify'
-import { statusButtons, statusConfirmMessage, statusLabel } from '../utils/productStatus'
-import { availableStock } from '../utils/stockAdjustment'
+import { statusConfirmMessage, statusLabel } from '../utils/productStatus'
 import { PAGE_SIZE, correctedPage, createLatestGate, loadErrorMessage, pageSummary, parsePageParam } from '../utils/catalogueList'
+import { apiParams, clearedFilters, filtersToParams, hasActiveFilters, parseFilters, withFilter } from '../utils/catalogueFilters'
+import CatalogueToolbar from '../components/CatalogueToolbar'
+import CatalogueItem, { ITEM_GRID } from '../components/CatalogueItem'
 
 const List = ({ token }) => {
   const [searchParams, setSearchParams] = useSearchParams()
   const page = parsePageParam(searchParams.get('page'))
+  const filterKey = searchParams.toString()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const filters = useMemo(() => parseFilters(searchParams), [filterKey])
   const [list, setList] = useState([])
   const [pagination, setPagination] = useState(null)
+  const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [busyId, setBusyId] = useState('')
@@ -20,12 +26,31 @@ const List = ({ token }) => {
   const gate = useMemo(() => createLatestGate(), [])
   const controllerRef = useRef(null)
 
+  // The toolbar calls these from a debounced timer, so they read the latest state through a ref and
+  // keep a stable identity; otherwise a URL change would cancel a search the admin is still typing.
+  const latest = useRef({})
+  latest.current = { filters, setSearchParams }
+  const changeFilter = useCallback((key, value) => {
+    const { filters: current, setSearchParams: navigate } = latest.current
+    if (current[key] === value) return
+    navigate(filtersToParams(withFilter(current, key, value), 1))
+  }, [])
+  const clearFilters = useCallback(() => {
+    const { filters: current, setSearchParams: navigate } = latest.current
+    navigate(filtersToParams(clearedFilters(current), 1))
+  }, [])
+
   const goToPage = useCallback((target, replace = false) => {
-    const next = new URLSearchParams(searchParams)
-    if (target <= 1) next.delete('page')
-    else next.set('page', String(target))
-    setSearchParams(next, { replace })
-  }, [searchParams, setSearchParams])
+    setSearchParams(filtersToParams(filters, target), { replace })
+  }, [filters, setSearchParams])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    axios.get(`${backendUrl}/api/product/admin/categories`, { headers: { token }, signal: controller.signal })
+      .then(({ data }) => { if (data.success && Array.isArray(data.categories)) setCategories(data.categories) })
+      .catch(() => {})
+    return () => controller.abort()
+  }, [token])
 
   const fetchList = useCallback(async () => {
     controllerRef.current?.abort()
@@ -37,7 +62,7 @@ const List = ({ token }) => {
     try {
       const response = await axios.get(`${backendUrl}/api/product/admin/list`, {
         headers: { token },
-        params: { page, limit: PAGE_SIZE },
+        params: apiParams(filters, page, PAGE_SIZE),
         signal: controller.signal
       })
       if (!gate.isCurrent(requestId)) return
@@ -59,7 +84,7 @@ const List = ({ token }) => {
       setLoadError(loadErrorMessage(error))
       setLoading(false)
     }
-  }, [token, page, gate, goToPage])
+  }, [token, page, filters, gate, goToPage])
 
   const updateStatus = async (product, button) => {
     if (busyRef.current) return
@@ -90,13 +115,15 @@ const List = ({ token }) => {
 
   const summary = pagination ? pageSummary(pagination) : null
   const showTable = !loadError && summary
+  const filtered = hasActiveFilters(filters)
 
   return (
     <section>
       <div className='flex justify-between items-center mb-4'>
         <h1 className='font-medium'>Product catalogue</h1>
-        <Link to='/add' className='border px-4 py-2'>Add product</Link>
+        <Link to='/add' className='inline-flex min-h-[44px] items-center border px-4'>Add product</Link>
       </div>
+      <CatalogueToolbar filters={filters} categories={categories} onChange={changeFilter} onClear={clearFilters} />
       {loading && !summary && !loadError && <p role='status' className='py-6 text-gray-500'>Loading products…</p>}
       {loadError && (
         <div role='alert' className='border border-red-300 bg-red-50 p-4 text-sm'>
@@ -109,39 +136,22 @@ const List = ({ token }) => {
       )}
       {showTable && (
       <div className={`flex flex-col gap-2 ${loading ? 'opacity-60' : ''}`} aria-busy={loading}>
-        <div className='hidden md:grid grid-cols-[0.7fr_2fr_1fr_0.8fr_1.2fr_1fr] items-center py-2 px-2 border bg-gray-100 text-sm'>
-          <b>Image</b><b>Product</b><b>Type</b><b>Price</b><b>SKU / Stock</b><b>Status</b>
-        </div>
-        {list.map(product => (
-          <div key={product._id} className='grid grid-cols-[0.7fr_2fr_1fr] md:grid-cols-[0.7fr_2fr_1fr_0.8fr_1.2fr_1fr] items-center gap-2 py-2 px-2 border text-sm'>
-            <img className='w-12 h-14 object-cover' src={product.images?.[0]?.url} alt='' />
-            <div>
-              <p>{product.name}</p>
-              {product.collections?.length > 0 && (
-                <p className='mt-1 text-xs text-gray-500'>Collections: {product.collections.join(', ')}</p>
-              )}
-              <Link to={`/add?id=${product._id}`} className='underline text-xs'>Edit product</Link>
-            </div>
-            <p>{product.productType}</p>
-            <p>{currency}{(product.pricePaise / 100).toFixed(2)}</p>
-            <div className='text-xs'>
-              {product.variants?.map(variant => (
-                <p key={variant._id}>{variant.sku}{variant.active === false ? ' (inactive)' : ''}: {availableStock(variant)} available</p>
-              ))}
-            </div>
-            <div className='flex flex-col gap-1'>
-              <span>{statusLabel(product.status)}</span>
-              {statusButtons(product.status).map(button => (
-                <button key={button.action} type='button' disabled={busyId === product._id}
-                  onClick={() => updateStatus(product, button)}
-                  className='underline text-left text-xs disabled:opacity-40'>
-                  {busyId === product._id ? 'Working…' : button.label}
-                </button>
-              ))}
-            </div>
+        {list.length > 0 && (
+          <div className={`hidden md:grid ${ITEM_GRID} items-center gap-x-3 border bg-gray-100 p-3 text-sm`}>
+            <b>Image</b><b>Product</b><b>Type</b><b>Price</b><b>Stock</b>
           </div>
+        )}
+        {list.map(product => (
+          <CatalogueItem key={product._id} product={product} currency={currency}
+            busy={busyId === product._id} onStatus={updateStatus} />
         ))}
-        {list.length === 0 && <p className='py-6 text-gray-500'>No products yet.</p>}
+        {list.length === 0 && filtered && (
+          <div className='border bg-white p-4 text-sm' data-testid='no-results'>
+            <p className='text-gray-700'>No products match your search or filters.</p>
+            <button type='button' onClick={clearFilters} className='mt-2 min-h-[44px] border px-4'>Clear all filters</button>
+          </div>
+        )}
+        {list.length === 0 && !filtered && <p className='py-6 text-gray-500'>No products yet.</p>}
       </div>
       )}
       {showTable && (

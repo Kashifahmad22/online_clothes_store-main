@@ -44,8 +44,8 @@ test("invalid page, limit and sort values and unknown parameters are rejected", 
         { page: "0" }, { page: "-1" }, { page: "1.5" }, { page: "abc" }, { page: "" }, { page: "1e3" },
         { page: "99999999999" }, { page: ["1", "2"] }, { page: { $gt: "0" } },
         { limit: "0" }, { limit: "-5" }, { limit: "2.5" }, { limit: "1000" }, { limit: "20abc" },
-        { sort: "price-asc" }, { sort: "name" }, { sort: "__proto__" }, { sort: ["updatedAt-desc"] },
-        { sort: { $ne: "x" } }, { status: "draft" }, { "$where": "1" }, { search: "x" }
+        { sort: "stock-asc" }, { sort: "name" }, { sort: "__proto__" }, { sort: ["updatedAt-desc"] },
+        { sort: { $ne: "x" } }, { foo: "draft" }, { "$where": "1" }, { "search[$ne]": "x" }
     ];
     for (const query of bad) {
         assert.throws(() => parseAdminCatalogueQuery(query), { status: 400 }, JSON.stringify(query));
