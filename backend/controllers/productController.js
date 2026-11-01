@@ -11,6 +11,7 @@ import {
     validatePublishableProduct
 } from "../utils/catalogueValidation.js";
 import { parseCatalogueQuery } from "../utils/catalogueQuery.js";
+import { resolveBadgeFlags } from "../utils/merchandising.js";
 
 const respondError = (res, error) => {
     if (error.status) {
@@ -161,7 +162,7 @@ const addProduct = async (req, res) => {
                     images,
                     details: payload.details || {},
                     status: payload.status === "published" ? "published" : "draft",
-                    bestseller: payload.bestseller === true,
+                    ...resolveBadgeFlags(payload),
                     seo: payload.seo || {}
                 }], { session });
                 await attachVariants(product, payload.variants, session);
@@ -220,7 +221,7 @@ const updateProduct = async (req, res) => {
                     images,
                     details: payload.details || {},
                     status: payload.status === "published" ? "published" : "draft",
-                    bestseller: payload.bestseller === true,
+                    ...resolveBadgeFlags(payload, product),
                     seo: payload.seo || {}
                 } }, { runValidators: true, session });
                 await attachVariants(product, payload.variants, session);

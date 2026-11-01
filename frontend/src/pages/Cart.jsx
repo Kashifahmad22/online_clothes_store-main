@@ -92,9 +92,9 @@ const Cart = () => {
                     </p>}
                     {overStock && (
                       <p className='cart-line__stock cart-line__stock--unavailable' role='alert'>
-                        Only {maxQuantity} available.{' '}
+                        There is not enough stock for this quantity.{' '}
                         <button type='button' className='underline' disabled={busy}
-                          onClick={() => changeQuantity(item, maxQuantity)}>Reduce to {maxQuantity}</button>
+                          onClick={() => changeQuantity(item, maxQuantity)}>Reduce to the available quantity</button>
                       </p>
                     )}
                     <div className='cart-line__actions'>

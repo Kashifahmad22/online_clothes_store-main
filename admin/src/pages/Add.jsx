@@ -4,6 +4,7 @@ import PropTypes from 'prop-types'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { backendUrl } from '../App'
+import { HIGHLIGHT_OPTIONS, applyHighlight, highlightFromProduct } from '../utils/productHighlight'
 
 const blankProduct = () => ({
   name: '',
@@ -17,6 +18,7 @@ const blankProduct = () => ({
   mrp: '',
   status: 'draft',
   bestseller: false,
+  fastSelling: false,
   details: {
     fabric: '',
     composition: '',
@@ -268,6 +270,7 @@ const Add = ({ token }) => {
       }))
     }
     delete payload.price
+    delete payload.lowStock
     delete payload.mrp
     payload.variants.forEach(variant => delete variant.priceOverride)
     formData.append('product', JSON.stringify(payload))
@@ -542,11 +545,24 @@ const Add = ({ token }) => {
         <input type='file' accept='image/jpeg,image/png,image/webp' multiple onChange={addUploads} />
       </section>
 
-      <label className='flex gap-2 items-center'>
-        <input type='checkbox' checked={product.bestseller === true}
-          onChange={event => setField('bestseller', event.target.checked)} />
-        Feature as a bestseller
-      </label>
+      <section className='w-full grid gap-2'>
+        <h2 className='font-medium'>Product highlights</h2>
+        <label className='grid gap-1 sm:max-w-xs'>
+          <span className='text-sm font-medium'>Product badge</span>
+          <select value={highlightFromProduct(product)}
+            onChange={event => setProduct(current => applyHighlight(current, event.target.value))}
+            className='px-3 py-2'>
+            {HIGHLIGHT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </label>
+        <p className='text-sm text-gray-600'>
+          Shown to customers on the product and in listings. Only choose a badge that is true for this product.
+        </p>
+        <p className='text-sm text-gray-600'>
+          <strong>Low Stock</strong> is added automatically when only a few pieces are left in the inventory below.
+          It cannot be switched on by hand, and customers never see the exact number.
+        </p>
+      </section>
       <button disabled={saving} type='submit' className='px-6 py-3 bg-black text-white disabled:opacity-50'>
         {saving ? 'Saving…' : editId ? 'Save changes' : 'Save product'}
       </button>

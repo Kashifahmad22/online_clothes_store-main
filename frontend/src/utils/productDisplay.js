@@ -20,9 +20,32 @@ export const validatePurchaseQuantity = (raw, variant, inCart = 0) => {
     return { valid: false, quantity: 0, error: 'Enter a whole number of 1 or more.' }
   }
   if (quantity > remaining) {
-    return { valid: false, quantity: 0, error: `Only ${remaining} more available${inCart > 0 ? ' (you already have some in your cart)' : ''}.` }
+    return {
+      valid: false,
+      quantity: 0,
+      error: inCart > 0
+        ? 'That is more than is available, including what is already in your cart.'
+        : 'That quantity is more than we can supply right now.'
+    }
   }
   return { valid: true, quantity, error: '' }
+}
+
+// Customer-facing merchandising badges. The admin-chosen badge and the backend-calculated low-stock flag
+// are the only inputs; nothing is inferred here, and unavailable products never carry a badge.
+export const MERCHANDISING_BADGE_LABELS = {
+  'best-seller': 'Best Seller',
+  'fast-selling': 'Fast Selling',
+  'low-stock': 'Low Stock'
+}
+
+export const getMerchandisingBadges = product => {
+  if (!product || getAvailableStock(product) < 1) return []
+  const badges = []
+  if (product.bestseller === true) badges.push('best-seller')
+  else if (product.fastSelling === true) badges.push('fast-selling')
+  if (product.lowStock === true) badges.push('low-stock')
+  return badges
 }
 
 export const getProductImage = product => {

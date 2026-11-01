@@ -40,6 +40,7 @@ const productSchema = new mongoose.Schema({
         index: true
     },
     bestseller: { type: Boolean, default: false },
+    fastSelling: { type: Boolean, default: false },
     seo: {
         title: { type: String, trim: true, maxlength: 180 },
         description: { type: String, trim: true, maxlength: 320 }

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { isLowStock } from "./merchandising.js";
 
 const invalidInput = message => Object.assign(new Error(message), { status: 400 });
 const productTypes = new Set(["saree", "suit-piece", "suit", "suit-set", "dress", "lehenga", "other"]);
@@ -51,6 +52,12 @@ export const parseProductPayload = (raw) => {
     }
     if (product.bestseller !== undefined && typeof product.bestseller !== "boolean") {
         throw invalidInput("Bestseller must be true or false.");
+    }
+    if (product.fastSelling !== undefined && typeof product.fastSelling !== "boolean") {
+        throw invalidInput("Fast selling must be true or false.");
+    }
+    if (product.bestseller === true && product.fastSelling === true) {
+        throw invalidInput("Choose either Best Seller or Fast Selling, not both.");
     }
     if (product.subCategory !== undefined && typeof product.subCategory !== "string") {
         throw invalidInput("Subcategory must be text.");
@@ -158,6 +165,9 @@ export const toPublicProduct = (product, variants) => {
     const data = product.toObject ? product.toObject() : product;
     return {
         ...data,
+        bestseller: data.bestseller === true,
+        fastSelling: data.fastSelling === true,
+        lowStock: isLowStock(variants.map(variant => variant.toObject ? variant.toObject() : variant)),
         price: data.pricePaise / 100,
         mrp: data.mrpPaise == null ? null : data.mrpPaise / 100,
         image: (data.images || []).map(image => image.url),

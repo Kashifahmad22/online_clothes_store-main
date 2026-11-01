@@ -38,10 +38,12 @@ test('zero, negative, fractional, empty and non-numeric values are rejected, nev
   }
 })
 
-test('above-stock values are rejected with the remaining amount', () => {
+test('above-stock values are rejected without revealing the stock count', () => {
   const result = validatePurchaseQuantity('99', variant(3), 1)
   assert.equal(result.valid, false)
-  assert.match(result.error, /Only 2 more/)
+  assert.doesNotMatch(result.error, /\d/)
+  assert.match(result.error, /already in your cart/)
+  assert.doesNotMatch(validatePurchaseQuantity('99', variant(3), 0).error, /\d/)
 })
 
 test('unavailable variants and a maxed cart reject any quantity', () => {

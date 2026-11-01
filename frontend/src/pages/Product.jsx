@@ -5,7 +5,8 @@ import { ShopContext } from '../context/ShopContext'
 import ProductGallery from '../components/ProductGallery'
 import ProductPrice from '../components/ProductPrice'
 import RelatedProducts from '../components/RelatedProducts'
-import { availableQuantity, isVariantAvailable, remainingQuantity, validatePurchaseQuantity } from '../utils/productDisplay'
+import MerchandisingBadges from '../components/MerchandisingBadges'
+import { isVariantAvailable, remainingQuantity, validatePurchaseQuantity } from '../utils/productDisplay'
 import { applyPageMeta, buildProductJsonLd, buildProductMeta, normaliseSiteUrl, setJsonLd } from '../utils/seo'
 
 const detailLabels = {
@@ -175,6 +176,7 @@ const Product = () => {
             {product.productType === 'saree' ? 'Saree' : product.category}
           </p>
           <h1 className='product-title'>{product.name}</h1>
+          <MerchandisingBadges product={product} />
           {selectedVariant?.sku && <p className='mt-3 text-xs tracking-wide text-stone-500'>SKU: {selectedVariant.sku}</p>}
           <div className='mt-5 border-y border-[#e7dfd3] py-4'>
             <ProductPrice price={price} mrp={mrp} />
@@ -209,7 +211,7 @@ const Product = () => {
           )}
 
           <p className={`product-availability mt-4 text-sm font-medium ${isAvailable ? 'product-availability--available' : 'text-stone-600'}`}>
-            {isAvailable ? `In stock · ${availableQuantity(selectedVariant)} available` : 'Currently out of stock'}
+            {isAvailable ? 'In stock' : 'Currently out of stock'}
           </p>
 
           {isAvailable && (
@@ -227,7 +229,7 @@ const Product = () => {
                 className={`mt-1 text-xs ${!quantityCheck.valid && remaining > 0 ? 'text-red-800' : 'text-stone-600'}`}>
                 {!quantityCheck.valid && remaining > 0
                   ? quantityCheck.error
-                  : inCart > 0 ? `${inCart} already in your cart. You can add up to ${remaining} more.` : ''}
+                  : inCart > 0 ? `${inCart} already in your cart.` : ''}
               </p>
             </div>
           )}

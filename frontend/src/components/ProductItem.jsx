@@ -2,6 +2,7 @@ import PropTypes from 'prop-types'
 import { Link } from 'react-router-dom'
 import ProductPrice from './ProductPrice'
 import OptimizedImage from './OptimizedImage'
+import MerchandisingBadges from './MerchandisingBadges'
 import { getAvailableStock, getProductImage, getStartingPrice } from '../utils/productDisplay'
 
 const ProductItem = ({ product }) => {
@@ -35,6 +36,7 @@ const ProductItem = ({ product }) => {
           {product.name}
         </p>
         <ProductPrice price={price} mrp={mrp} compact />
+        <MerchandisingBadges product={product} className='merch-badges--card' />
       </div>
     </Link>
   )
@@ -53,6 +55,9 @@ ProductItem.propTypes = {
     })),
     price: PropTypes.number,
     mrp: PropTypes.number,
+    bestseller: PropTypes.bool,
+    fastSelling: PropTypes.bool,
+    lowStock: PropTypes.bool,
     variants: PropTypes.arrayOf(PropTypes.shape({
       active: PropTypes.bool,
       stockOnHand: PropTypes.number,

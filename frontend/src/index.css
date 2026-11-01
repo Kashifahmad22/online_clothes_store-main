@@ -884,6 +884,54 @@ summary:focus-visible {
   color: #886b43;
 }
 
+.merch-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.merch-badge {
+  padding: 3px 8px;
+  border: 1px solid;
+  border-radius: 2px;
+  font-family: Outfit, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.merch-badge--best-seller {
+  border-color: var(--gold);
+  background: #f6edd9;
+  color: #5e4217;
+}
+
+.merch-badge--fast-selling {
+  border-color: var(--wine);
+  background: #f3e6e9;
+  color: var(--wine);
+}
+
+.merch-badge--low-stock {
+  border-color: #b8593a;
+  background: #f8e8df;
+  color: #8a3a1f;
+}
+
+.product-info > .merch-badges {
+  margin-top: 12px;
+}
+
+.product-info .merch-badge {
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
 .catalogue-empty {
   margin: 28px 0;
   padding: clamp(34px, 7vw, 76px) 20px;
