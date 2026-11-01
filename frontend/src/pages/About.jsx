@@ -11,15 +11,14 @@ const About = () => {
       <header className='editorial-info-page__heading'>
         <p className='eyebrow'>{brand.tagline}</p>
         <h1>{brand.publicName}</h1>
-        <p>The Art of Indian Ethnic Wear.</p>
       </header>
       <div className='editorial-info-page__body'>
         <section>
           <h2>Indian style, thoughtfully presented</h2>
           <p>
-            PSH is an online destination for sarees and ethnic wear. Explore the current catalogue,
-            compare available product information, and choose from the options listed for each item.
-            Product photographs, prices, specifications and availability are shown from the live catalogue.
+            PSH is an online store for sarees and ethnic wear. Browse the collection, compare product
+            details and choose from the options listed for each item. Photographs, prices, specifications
+            and availability on every product page come directly from our live catalogue.
           </p>
           <p>{brand.description}</p>
           {checkout.codAvailable && <p>Cash on delivery is available at checkout.</p>}
@@ -28,8 +27,8 @@ const About = () => {
         </section>
         <aside className='editorial-info-page__address'>
           <p className='eyebrow'>The PSH edit</p>
-          <p>Sarees lead our collection today, with suits, suit sets, dresses and more categories planned as the catalogue grows.</p>
-          <Link to='/contact' className='text-link'>Contact PSH <span aria-hidden='true'>↗</span></Link>
+          <p>Sarees lead our collection today. Suits, suit sets and dresses are planned as the catalogue grows.</p>
+          <Link to='/contact' className='text-link'>Contact PSH</Link>
         </aside>
       </div>
     </main>

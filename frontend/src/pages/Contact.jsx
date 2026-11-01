@@ -14,7 +14,7 @@ const Contact = () => {
       <header className='editorial-info-page__heading'>
         <p className='eyebrow'>{siteSettings.brand.publicName}</p>
         <h1>How can we help?</h1>
-        <p>For product questions or order assistance, use the support details configured here.</p>
+        <p>For product questions or help with an order, reach us using the details below.</p>
       </header>
       <div className='editorial-info-page__body'>
         <section>
@@ -29,15 +29,15 @@ const Contact = () => {
           {support.description && <p className='mt-4'>{support.description}</p>}
           {!hasContact && (
             <p role='status' className='contact-notice'>
-              Customer support contact details are not configured yet.
+              Support contact details will be published here soon.
             </p>
           )}
-          <Link to='/orders' className='text-link mt-5'>View your orders <span aria-hidden='true'>↗</span></Link>
+          <Link to='/orders' className='text-link mt-5'>View your orders</Link>
         </section>
         <aside className='editorial-info-page__address'>
           <p className='eyebrow'>Explore PSH</p>
-          <p>Browse available products and their current options in the live catalogue.</p>
-          <Link to='/collection' className='text-link'>Browse the catalogue <span aria-hidden='true'>↗</span></Link>
+          <p>Browse available products and their current options.</p>
+          <Link to='/collection' className='text-link'>Browse the collection</Link>
         </aside>
       </div>
     </main>

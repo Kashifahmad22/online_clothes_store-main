@@ -69,7 +69,7 @@ const OrderConfirmation = () => {
             {formatOrderDate(order) && <p>Placed on {formatOrderDate(order)}</p>}
             {isCod && (
               <p>
-                You chose Cash on Delivery. No payment is needed now — please pay the order total
+                You chose Cash on Delivery.                 No payment is needed now. Please pay the order total
                 when your order is delivered.
               </p>
             )}

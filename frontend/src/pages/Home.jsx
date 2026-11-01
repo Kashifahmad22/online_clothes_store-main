@@ -58,7 +58,7 @@ const Home = () => {
             <p className='eyebrow'>A little something for every occasion</p>
             <h2 id='home-categories-heading'>Shop by category</h2>
           </div>
-          <Link to='/collection' className='text-link'>View everything <span aria-hidden='true'>↗</span></Link>
+          <Link to='/collection' className='text-link'>View everything</Link>
         </div>
         <div className='category-grid category-grid--assortment'>
           {categories.map(({ name, slug, status, path, product }) => {
@@ -87,7 +87,7 @@ const Home = () => {
                 ) : <CategoryMotif />}
                 <span className='category-tile__label'>
                   <span className='category-tile__name'>{name}</span>
-                  <span className='category-tile__cta'>Shop now <span aria-hidden='true'>↗</span></span>
+                  <span className='category-tile__cta'>Shop now</span>
                 </span>
               </Link>
             )
@@ -102,7 +102,7 @@ const Home = () => {
               <p className='eyebrow'>Browse by fabric</p>
               <h2>Find your favourite weave</h2>
             </div>
-            <Link to='/collection' className='text-link'>Shop all fabrics <span aria-hidden='true'>↗</span></Link>
+            <Link to='/collection' className='text-link'>Shop all fabrics</Link>
           </div>
           <div className='category-grid'>
             {fabrics.slice(0, 5).map(({ name, product }) => {
@@ -113,7 +113,7 @@ const Home = () => {
                   <OptimizedImage src={image.url} alt={image.altText || product.name}
                     widths={[240, 360, 480]} sizes='(min-width: 1024px) 25vw, 50vw' />
                   <span className='category-tile__shade' />
-                  <span className='category-tile__label'>{name}<span aria-hidden='true'>↗</span></span>
+                  <span className='category-tile__label'>{name}</span>
                 </Link>
               )
             })}
@@ -174,7 +174,7 @@ const Home = () => {
           <p className='eyebrow'>{siteSettings.brand.tagline}</p>
           <h2>{siteSettings.brand.publicName}</h2>
           <p>{siteSettings.brand.description}</p>
-          <Link to='/about' className='text-link'>Our story <span aria-hidden='true'>↗</span></Link>
+          <Link to='/about' className='text-link'>Our story</Link>
         </div>
         <div className='brand-note__trust'>
           <div><span className='brand-note__mark'>01</span><p>Cash on delivery<br /><small>Available at checkout</small></p></div>

@@ -14,7 +14,7 @@ const CollectionSection = ({ title, description, products, to = '/collection', l
           {description && <p>{description}</p>}
         </div>
         <Link to={to} className='text-link'>
-          {linkLabel} <span aria-hidden='true'>↗</span>
+          {linkLabel}
         </Link>
       </div>
       <div className={`product-grid ${products.length === 1 ? 'product-grid--single' : ''}`}>

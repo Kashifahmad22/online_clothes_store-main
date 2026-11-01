@@ -3,9 +3,7 @@ import { Link } from 'react-router-dom'
 import { useContext } from 'react'
 import { ShopContext } from '../context/ShopContext'
 import { policyPages } from '../config/policies'
-
-// Splits stored plain text into paragraphs; rendered as React text, never as HTML.
-const toParagraphs = text => text.split(/\n\s*\n/).map(block => block.trim()).filter(Boolean)
+import { parsePolicyText } from '../utils/policyFormat'
 
 const Policy = ({ policyKey }) => {
   const { siteSettings, siteSettingsError, siteSettingsLoaded } = useContext(ShopContext)
@@ -19,13 +17,19 @@ const Policy = ({ policyKey }) => {
       <header className='editorial-info-page__heading'>
         <p className='eyebrow'>{siteSettings.brand.publicName}</p>
         <h1>{page.label}</h1>
+        <p>{page.description}</p>
       </header>
       <div className='editorial-info-page__body policy-page__body'>
         <section aria-live='polite'>
           {loading && <p role='status'>Loading…</p>}
-          {!loading && text && toParagraphs(text).map((paragraph, index) => (
-            <p key={index} className='policy-page__paragraph'>{paragraph}</p>
-          ))}
+          {!loading && text && parsePolicyText(text).map((block, index) => {
+            if (block.type === 'heading') return <h2 key={index} className='policy-page__heading'>{block.text}</h2>
+            if (block.type === 'list') {
+              const List = block.ordered ? 'ol' : 'ul'
+              return <List key={index} className='policy-page__list'>{block.items.map((item, i) => <li key={i}>{item}</li>)}</List>
+            }
+            return <p key={index} className='policy-page__paragraph'>{block.text}</p>
+          })}
           {!loading && !text && siteSettingsError && (
             <p role='alert'>
               This policy could not be loaded right now. Please refresh the page or try again shortly.

@@ -16,7 +16,7 @@ const Hero = ({ product, brand }) => {
           Sarees, suits and ethnic wear with fabric, colour and care details shown as provided.
         </p>
         <Link to='/collection' className='button button--gold'>
-          Explore the collection <span aria-hidden='true'>↗</span>
+          Explore the collection
         </Link>
         <span className='editorial-hero__note'>{brand.tagline}</span>
       </div>
@@ -32,7 +32,6 @@ const Hero = ({ product, brand }) => {
         {image && (
           <div className='editorial-hero__image-caption'>
             <span>From our current collection</span>
-            <span aria-hidden='true'>✳</span>
           </div>
         )}
         <MadhubaniArtwork variant='hero' />
