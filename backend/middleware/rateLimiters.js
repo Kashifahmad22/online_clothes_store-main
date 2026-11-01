@@ -36,6 +36,14 @@ export const createWebhookLimiter = ({ limit = 120 } = {}) => rateLimit({
     message: { success: false, message: 'Too many webhook requests.' }
 })
 
+// Each check can call a courier API, so it gets its own tighter per-client budget.
+export const createDeliveryLimiter = ({ limit = 30 } = {}) => rateLimit({
+    ...baseOptions,
+    windowMs: 10 * 60 * 1000,
+    limit,
+    message: { success: false, message: 'Too many delivery checks. Please try again shortly.' }
+})
+
 export const createAuthLimiter = ({ limit = 10 } = {}) => rateLimit({
     ...baseOptions,
     windowMs: 15 * 60 * 1000,

@@ -5,8 +5,17 @@ import { useNavigate } from "react-router-dom";
 import axios from 'axios'
 import { availableQuantity, isVariantAvailable } from "../utils/productDisplay";
 import { defaultSiteSettings } from "../config/siteSettings";
+import { clearGuestCart, loadGuestCart, mergeCarts, reconcileGuestCart, saveGuestCart } from "../utils/guestCart";
 
 export const ShopContext = createContext();
+
+const readStoredToken = () => {
+    try {
+        return localStorage.getItem('token') || '';
+    } catch {
+        return '';
+    }
+}
 
 const ShopContextProvider = (props) => {
 
@@ -14,15 +23,17 @@ const ShopContextProvider = (props) => {
     const backendUrl = import.meta.env.VITE_BACKEND_URL
     const [search, setSearch] = useState('');
     const [showSearch, setShowSearch] = useState(false);
-    const [cartItems, setCartItems] = useState({});
+    const [token, setToken] = useState(readStoredToken)
+    // A signed-in cart always comes from the server; only guests restore the locally persisted cart.
+    const [cartItems, setCartItems] = useState(() => readStoredToken() ? {} : loadGuestCart());
     const [products, setProducts] = useState([]);
     const [productsLoading, setProductsLoading] = useState(true);
     const [productsError, setProductsError] = useState('');
     const [siteSettings, setSiteSettings] = useState(defaultSiteSettings);
     const [siteSettingsError, setSiteSettingsError] = useState('');
     const [siteSettingsLoaded, setSiteSettingsLoaded] = useState(false);
-    const [token, setToken] = useState('')
-    const guestCartRef = useRef({});
+    const guestCartRef = useRef(loadGuestCart());
+    const productsRef = useRef([]);
     const navigate = useNavigate();
 
 
@@ -222,42 +233,51 @@ const ShopContextProvider = (props) => {
     }, [backendUrl]);
 
     const getUserCart = useCallback(async token => {
+        // Take the guest cart up front so it can be merged exactly once, even if this runs again.
+        const guestCart = guestCartRef.current
+        guestCartRef.current = {}
+        clearGuestCart()
         try {
             const response = await axios.post(`${backendUrl}/api/cart/get`, {}, { headers: { token } })
             if (!response.data.success) {
                 throw new Error(response.data.message || 'Unable to load your cart.')
             }
 
-            const serverCart = response.data.cartData || {}
-            const mergedCart = structuredClone(serverCart)
-            const guestCart = guestCartRef.current
-            const updates = []
-            for (const productId of Object.keys(guestCart)) {
-                for (const variantId of Object.keys(guestCart[productId] || {})) {
-                    const guestQuantity = guestCart[productId][variantId]
-                    if (!Number.isSafeInteger(guestQuantity) || guestQuantity < 1) continue
-                    const serverQuantity = serverCart[productId]?.[variantId] || 0
-                    const quantity = serverQuantity + guestQuantity
-                    if (!mergedCart[productId]) mergedCart[productId] = {}
-                    mergedCart[productId][variantId] = quantity
-                    updates.push(
-                        axios.post(`${backendUrl}/api/cart/update`, {
-                            productId,
-                            variantId,
-                            quantity
-                        }, { headers: { token } }).then(updateResponse => {
-                            if (!updateResponse.data.success) {
-                                throw new Error(updateResponse.data.message || 'Unable to merge a cart item.')
-                            }
-                        }).catch(error => {
-                            toast.error(error.response?.data?.message || error.message || 'A cart item could not be synced. Review it before ordering.')
-                        })
-                    )
-                }
+            const limitFor = (productId, variantId) => {
+                const variant = productsRef.current.find(item => item._id === productId)
+                    ?.variants?.find(item => item._id === variantId)
+                if (!variant) return null
+                return isVariantAvailable(variant) ? availableQuantity(variant) : 0
             }
-            await Promise.all(updates)
-            setCartItems(mergedCart)
+            const { merged, lines, dropped } = mergeCarts(response.data.cartData || {}, guestCart, limitFor)
+            await Promise.all(lines.map(line =>
+                axios.post(`${backendUrl}/api/cart/update`, {
+                    productId: line.productId,
+                    variantId: line.variantId,
+                    quantity: line.quantity
+                }, { headers: { token } }).then(updateResponse => {
+                    if (!updateResponse.data.success) {
+                        throw new Error(updateResponse.data.message || 'Unable to merge a cart item.')
+                    }
+                }).catch(error => {
+                    // Show what the server actually holds so the cart never disagrees with it.
+                    if (line.serverQuantity > 0) merged[line.productId][line.variantId] = line.serverQuantity
+                    else {
+                        delete merged[line.productId][line.variantId]
+                        if (Object.keys(merged[line.productId]).length === 0) delete merged[line.productId]
+                    }
+                    dropped.push({ productId: line.productId, variantId: line.variantId })
+                    toast.error(error.response?.data?.message || error.message || 'A cart item could not be synced. Review it before ordering.')
+                })
+            ))
+            if (dropped.length > 0) {
+                toast.info('Some items from your earlier bag could not be added because they are unavailable or at their stock limit.')
+            }
+            setCartItems(merged)
         } catch (error) {
+            // Nothing was merged, so keep the guest cart for the next attempt.
+            guestCartRef.current = guestCart
+            saveGuestCart(guestCart)
             toast.error(error.response?.data?.message || error.message || 'Unable to load your cart.')
         }
     }, [backendUrl])
@@ -271,27 +291,39 @@ const ShopContextProvider = (props) => {
     }, [getSiteSettings])
 
     useEffect(() => {
-        if (!token) guestCartRef.current = cartItems
+        productsRef.current = products
+    }, [products])
+
+    useEffect(() => {
+        if (token) return
+        guestCartRef.current = cartItems
+        saveGuestCart(cartItems)
     }, [cartItems, token])
 
     useEffect(() => {
-        if (!token) {
-            const storedToken = localStorage.getItem('token')
-            if (storedToken) setToken(storedToken)
-            return
+        if (token || productsLoading || productsError) return
+        const { cart, removed } = reconcileGuestCart(cartItems, products)
+        if (removed > 0) {
+            setCartItems(cart)
+            toast.info('Some items in your bag are no longer available and were removed.')
         }
-        getUserCart(token)
+    }, [token, productsLoading, productsError, products, cartItems])
+
+    useEffect(() => {
+        if (token) getUserCart(token)
     }, [getUserCart, token])
 
     const value = {
         products, productsLoading, productsError, getProductById, currency,
+        refreshProducts: getProductsData,
         getCartAmountPaise, getShippingAmount,
         siteSettings, siteSettingsError, siteSettingsLoaded,
         search, setSearch, showSearch, setShowSearch,
         cartItems, addToCart,setCartItems, setProducts,
         getCartCount, updateQuantity,
         getCartAmount, navigate, backendUrl,
-        setToken, token
+        setToken, token,
+        refreshCart: () => (token ? getUserCart(token) : Promise.resolve())
     }
 
     return (

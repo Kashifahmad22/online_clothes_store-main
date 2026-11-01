@@ -13,6 +13,11 @@ select,input,textarea{
     border-radius: 4px;
 }
 
+/* Form sections are grids; a single auto column grows to its widest control and overflows narrow screens. */
+form > section.grid{
+    grid-template-columns: minmax(0, 1fr);
+}
+
 .active{
     background-color: #ffebf5;
     border-color: #C586A5;

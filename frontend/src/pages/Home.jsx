@@ -7,7 +7,7 @@ import Hero from '../components/Hero'
 import OptimizedImage from '../components/OptimizedImage'
 import { campaigns } from '../config/campaigns'
 import { getProductImage } from '../utils/productDisplay'
-import { storefrontNavigation } from '../config/productCategories'
+import { catalogueState, storefrontNavigation } from '../config/productCategories'
 import { resolveProductCategory } from '../config/canonicalCategories'
 
 const CategoryMotif = () => (
@@ -21,9 +21,9 @@ const CategoryMotif = () => (
 )
 
 const Home = () => {
-  const { products, productsLoading, productsError, siteSettings } = useContext(ShopContext)
+  const { products, productsLoading, productsError, refreshProducts, siteSettings } = useContext(ShopContext)
   const featuredProduct = products.find(product => getProductImage(product))
-  const categories = useMemo(() => storefrontNavigation(products)
+  const categories = useMemo(() => storefrontNavigation(products, catalogueState({ productsLoading, productsError }))
     .map(category => {
       const product = category.status === 'available'
         ? products.find(item => resolveProductCategory(item).category?.slug === category.slug && getProductImage(item))
@@ -31,7 +31,7 @@ const Home = () => {
         : null
       return { name: category.label, slug: category.slug, status: category.status, path: `/category/${category.slug}`, product }
     })
-    .slice(0, 6), [products])
+    .slice(0, 6), [products, productsLoading, productsError])
   const fabrics = useMemo(() => [...new Set(
     products.map(product => product.details?.fabric).filter(value => typeof value === 'string' && value.trim())
   )].map(name => ({
@@ -138,9 +138,10 @@ const Home = () => {
       )}
 
       {productsError && (
-        <p role='alert' className='my-6 border border-red-200 bg-red-50 p-4 text-sm text-red-900'>
-          The catalogue could not be loaded. Please try again shortly.
-        </p>
+        <div role='alert' className='my-6 border border-red-200 bg-red-50 p-4 text-sm text-red-900'>
+          <p>The catalogue could not be loaded, so category availability is unknown. Please try again.</p>
+          <button type='button' onClick={refreshProducts} className='button button--wine mt-3'>Try again</button>
+        </div>
       )}
 
       <CollectionSection

@@ -50,23 +50,23 @@ Prepaid checkout also requires MongoDB transactions. The backend reserves availa
 
 Configure a Razorpay webhook in **test mode** for `payment.authorized`, `payment.failed`, `payment.captured`, and `order.paid`, targeting `/api/order/razorpay/webhook`. Keep automatic capture enabled in the Razorpay dashboard. COD remains available independently. Never place payment secrets in a `VITE_` variable or expose them to the browser. Do not configure live credentials in this phase.
 
-The storefront requests a provider order from the authenticated backend and receives only the public test key ID, server-calculated paise amount, provider order ID, and delivery prefill. The browser callback is not treated as proof of payment: the backend verifies the callback signature and fetches the payment from Razorpay before confirming it. Captured-payment webhooks use the raw request body and are deduplicated by event ID. Failed payments release the reservation; a retry first reacquires the same SKU quantities atomically and starts a fresh reservation window. A late capture after stock has been released is held from fulfilment for review. Payment and fulfilment states are visible in customer and admin order lists.
+The storefront requests a provider order from the authenticated backend and receives only the public test key ID, server-calculated paise amount, provider order ID, and delivery prefill. The browser callback is not treated as proof of payment: the backend verifies the callback signature and fetches the payment from Razorpay before confirming it. Captured-payment webhooks use the raw request body and are deduplicated by event ID. Failed payment attempts are recorded (`paymentStatus: failed`) but never release stock or extend the deadline: the customer may keep paying inside the same Razorpay order until the original reservation expires. Only the expiry sweeper releases an expired reservation. Retrying a failed order keeps the existing reservation; if it was already released, the retry re-reserves every SKU atomically (or fails with `INSUFFICIENT_STOCK`) and starts a fresh window. Payment and fulfilment states are visible in customer and admin order lists. See "Prepaid payment state machine" below.
 
 Use this flow only on a non-production test deployment with Razorpay test credentials. Confirm automatic capture and webhook delivery there, then verify successful, failed, duplicate, and late-capture handling without using live keys. The application intentionally rejects live-mode credentials; no production payment launch or real-charge test is supported by this phase. Adding the payment fields is additive, and existing orders remain readable without a data migration.
 
-Admins can manage manual fulfilment from the Orders page. Order transitions are validated server-side; Razorpay orders must be captured and not on review hold before processing or dispatch. Courier name and tracking number are required before marking an order shipped; a supplied tracking link must use HTTPS. Cancelling an unpaid prepaid order releases its reservation, while COD cancellation before dispatch restores stock transactionally. Paid prepaid cancellations are blocked until a refund workflow exists. Customer order history displays the supplied tracking details. Email or WhatsApp notifications are not configured and are not claimed as sent.
+Admins can manage manual fulfilment from the Orders page. Order transitions are validated server-side; Razorpay orders must be captured and not on review hold before processing or dispatch. Courier name and tracking number are required before marking an order shipped; a supplied tracking link must use HTTPS. Cancelling an unpaid prepaid order releases its reservation and closes it for payment. A paid prepaid cancellation is permitted only for an order already on a stock-not-deducted review hold; it takes no stock, is flagged for review and is never marked refunded. Otherwise it is blocked with `PAID_ORDER_REQUIRES_REFUND` until a refund workflow exists. COD cancellation before dispatch restores stock transactionally. Customer order history displays the supplied tracking details. Email or WhatsApp notifications are not configured and are not claimed as sent.
 
 `GET /health` reports `200` only when the MongoDB connection is ready and `503` otherwise. The backend waits for MongoDB before opening its HTTP listener. Set `PORT` to the port assigned by the hosting platform; local development defaults to `4000`.
 
-The existing ₹50 delivery charge remains the default. Authenticated administrators can configure the shipping fee and an optional free-shipping threshold in Storefront Settings; the backend recalculates both against the order subtotal when creating an order. Confirm the actual shipping policy before accepting production orders.
+The existing â‚¹50 delivery charge remains the default. Authenticated administrators can configure the shipping fee and an optional free-shipping threshold in Storefront Settings; the backend recalculates both against the order subtotal when creating an order. Confirm the actual shipping policy before accepting production orders.
 
 ## Storefront brand settings API
 
 The singleton storefront settings document is created on the first successful admin save; no migration is required. The model stores only customer-facing settings. Server credentials and other private configuration are not part of this document or either settings response.
 
-- `GET /api/storefront/public` — public, read-only settings used by the storefront.
-- `GET /api/storefront/admin` — authenticated admin read of the same editable settings.
-- `PUT /api/storefront/admin` — authenticated admin update; validates content, links and field lengths.
+- `GET /api/storefront/public` â€” public, read-only settings used by the storefront.
+- `GET /api/storefront/admin` â€” authenticated admin read of the same editable settings.
+- `PUT /api/storefront/admin` â€” authenticated admin update; validates content, links and field lengths.
 
 All admin routes require the existing admin token header. Public responses are explicitly allow-listed. Checkout capability is server-defined: COD is enabled, and prepaid availability is true only when complete Razorpay test-mode configuration is present; storefront settings cannot enable payment or shipping integrations. The configured shipping fee and optional threshold are public for cart previews and are always recalculated by the order API.
 
@@ -80,10 +80,10 @@ Search and social metadata is derived from published products and the public sto
 
 - `SITE_URL` (optional, Render env var) is the canonical storefront origin used in the sitemap, crawler HTML and canonical URLs. It must be an `https://` origin (http is accepted only for localhost). If it is missing or invalid, the fallback in `utils/siteUrl.js` (the current Vercel URL) is used and an invalid value logs a warning. It is also returned to the storefront as `siteUrl` in `GET /api/storefront/public`.
 - `GET /seo/product/:productId` returns lightweight HTML with Open Graph, Twitter, canonical and Product JSON-LD tags for a **published** product (by slug or ObjectId). Unknown, unpublished or malformed identifiers return a `noindex` 404 page, and database errors return 503 with `Retry-After`. Responses are `no-store`; only public product fields are used.
-- `GET /sitemap.xml` lists the home page, public storefront pages, configured policy pages, category/collection pages and published products, with `lastmod` from `updatedAt`. Every published product is included: when there are more than 5,000 URLs, `/sitemap.xml` becomes a sitemap index pointing to `/sitemaps/1`, `/sitemaps/2`, … (5,000 URLs each, well under the 50,000 protocol limit); `/sitemaps/:page` returns 404 otherwise. Responses are cached briefly in memory. Database errors return 503, never a partial or empty sitemap.
+- `GET /sitemap.xml` lists the home page, public storefront pages, configured policy pages, category/collection pages and published products, with `lastmod` from `updatedAt`. Every published product is included: when there are more than 5,000 URLs, `/sitemap.xml` becomes a sitemap index pointing to `/sitemaps/1`, `/sitemaps/2`, â€¦ (5,000 URLs each, well under the 50,000 protocol limit); `/sitemaps/:page` returns 404 otherwise. Responses are cached briefly in memory. Database errors return 503, never a partial or empty sitemap.
 - `frontend/vercel.json` proxies `/sitemap.xml`, `/sitemaps/:page` and, only for known social-crawler user agents (Facebook/Meta, WhatsApp, Twitter, LinkedIn, Telegram, Slack, Pinterest's crawler, Discord, Skype), `/product/:productId` to the routes above. Human visitors, in-app browsers and Googlebot continue to receive the React app (Googlebot renders JavaScript and reads the client-side tags and JSON-LD). The SPA catch-all must stay the last rewrite.
 
-**Custom-domain checklist** — when the final domain is connected:
+**Custom-domain checklist** â€” when the final domain is connected:
 
 1. Set `SITE_URL` on Render to the new origin and redeploy the backend.
 2. Update the `Sitemap:` line in `frontend/public/robots.txt`.
@@ -104,9 +104,9 @@ Then check a real product URL in the Facebook Sharing Debugger and by sending it
 
 **Fulfilment status** (`order.status`) and **payment status** (`order.paymentStatus`) are independent.
 Legal fulfilment transitions are enforced server-side in `utils/orderFulfillment.js`:
-`Order Placed → Processing → Packing → Packed → Shipped → Out for delivery → Delivered → Return Requested → Return Approved`
+`Order Placed â†’ Processing â†’ Packing â†’ Packed â†’ Shipped â†’ Out for delivery â†’ Delivered â†’ Return Requested â†’ Return Approved`
 (`Processing` and `Packing` are optional steps; `Packing` must go through `Packed` before `Shipped`.
-`Return Requested → Delivered` is allowed if the request is rejected). Cancellation is only possible before dispatch
+`Return Requested â†’ Delivered` is allowed if the request is rejected). Cancellation is only possible before dispatch
 (`Order Placed`, `Processing`, `Packing`, `Packed`); `Shipped`, `Out for delivery` and `Delivered` orders cannot be cancelled.
 `Cancelled` and `Return Approved` are terminal. Prepaid orders cannot enter a physical status until payment is verified
 and not on review hold.
@@ -116,11 +116,127 @@ API has a single shared admin role, so individual admins are not distinguished).
 
 - COD stays `cod_pending` until an admin uses *Mark COD cash as collected* (only after `Delivered`).
 - Prepaid orders become `paid` only after verified Razorpay capture (client verification or signed webhook).
-- A refund is recorded only from a signed `refund.processed` webhook, never from an admin request. `refunded` is set
-  only when the cumulative processed refunds equal the order total. **Subscribe the Razorpay webhook to `refund.processed`**
-  (Razorpay dashboard setting, not changed by this code), and issue refunds from the Razorpay dashboard.
+- A refund is marked `processed` only on gateway evidence: a signed `refund.processed` webhook or a Razorpay fetch that
+  reports it processed, never the response to the create call. `refunded` is set only when processed refunds equal the order
+  total. See *Refunds and reconciliation* below. **Subscribe the Razorpay webhook to `refund.created`, `refund.processed`
+  and `refund.failed`** (a dashboard setting this code does not change).
 - There is no customer self-service return flow: the return window and eligibility are business decisions. Admins can set
   `Return Requested` / `Return Approved`. Approving a return does not restore stock automatically.
+
+### Prepaid payment state machine
+
+Policy lives in `utils/paymentStateMachine.js`; every path (client verification, webhooks, retry, admin cancellation,
+expiry sweeper) goes through it and an illegal move throws `INVALID_PAYMENT_TRANSITION`.
+
+| From | Allowed to |
+|------|-----------|
+| `pending` | `authorized`, `failed`, `expired`, `paid` |
+| `authorized` | `failed`, `expired`, `paid` |
+| `failed` | `pending` (retry), `authorized`, `expired`, `paid` |
+| `expired` | `paid` (late capture only) |
+| `paid` | `refunded` (only from a signed `refund.processed` webhook) |
+| `refunded` | none |
+
+- **Failed payment:** recorded, but stock stays reserved and the deadline is unchanged. A late or out-of-order `failed`
+  event never overrides `paid`, or a newer authorised attempt. Duplicate events are no-ops.
+- **Expiry:** only the sweeper releases an expired reservation (`pending`/`failed` â†’ `expired`).
+- **Late capture:** amount, currency, Razorpay order and payment id are revalidated. A held reservation is settled
+  atomically. If it was released, stock is re-acquired only by a conditional atomic update in the same transaction;
+  if that fails the order is `paid` but on a review hold (`stock_unavailable`) and is not fulfilled. A capture on a
+  cancelled order is kept as evidence with an `order_cancelled` review and takes no stock. A second distinct captured
+  payment is recorded in `duplicatePaymentIds` with a `duplicate_payment` review and takes no stock.
+- **Retry restrictions:** retry and idempotent create-replay refuse cancelled (`ORDER_CANCELLED`), paid/refunded
+  (`ORDER_ALREADY_PAID`), non-`Order Placed` (`ORDER_NOT_PAYABLE`), reviewed (`PAYMENT_REVIEW_REQUIRED`), expired
+  (`PAYMENT_WINDOW_EXPIRED`) and in-progress (`PAYMENT_IN_PROGRESS`) orders with HTTP 409.
+- **Review holds:** `fulfillmentHold` plus `paymentReviewReason` (`stock_unavailable`, `inventory_conflict`,
+  `order_cancelled`, `duplicate_payment`, `authorized_on_closed_order`). Customers see only that the order is under review.
+- **Admin resolution (`POST /api/order/payment-review`, admin token required):** `release` needs a captured payment with a
+  payment id, an uncancelled `Order Placed` order and a stock-not-deducted reason; it re-acquires stock atomically and
+  fails with `STOCK_UNAVAILABLE` (hold kept) otherwise. `acknowledge` is refused for stock holds on live orders. Both
+  need a 5â€“120 character reason and are written to the status history with the actor. A repeat call returns
+  `NO_REVIEW_PENDING`, so stock cannot be deducted twice. Resolving a hold never issues a refund; refunds are a separate
+  admin action (below). The admin
+  Orders page shows review details read-only; the resolve action is API-only (UI is an outstanding Phase 9.8 item).
+- Behaviour under real MongoDB transactions and real Razorpay event ordering is not covered by the automated tests.
+
+### Refunds and reconciliation (Phase 9.7)
+
+**Refund states** (per refund record, integer paise): `requested` (stored, Razorpay has not acknowledged it, or the outcome
+is unknown after a timeout) â†’ `pending` (Razorpay acknowledged) â†’ `processed` | `failed`. A record only moves forward;
+`processed` is terminal and never downgraded by a late or duplicate event; `failed` may become `processed` because
+Razorpay is the authority. Records written before this phase have no status and count as `processed`.
+Requested and pending amounts count against the refundable balance, so refunds cannot exceed the captured amount in total.
+`paymentStatus` becomes `refunded` only when processed refunds equal the order total. A refund never restocks inventory and
+never clears a review hold.
+
+**Initiating (`POST /api/order/refund`, admin token):** body `{orderId, amountPaise, reason, idempotencyKey (uuid), paymentId?}`.
+The server re-fetches the payment from Razorpay (captured, same order, amount and currency, enough unrefunded balance),
+stores a `requested` record in a transaction, then calls Razorpay. The create response only moves it to `pending`. A
+definitive 4xx records `failed`; a timeout/5xx leaves it `requested` and returns `202 REFUND_OUTCOME_UNCERTAIN`, and further
+refunds on that payment are blocked (`REFUND_IN_DOUBT`) until it is resolved.
+**Idempotency:** a repeated `idempotencyKey` replays the stored record and never contacts Razorpay again (a different
+amount returns `IDEMPOTENCY_KEY_REUSED`). The Razorpay SDK in use (2.9.8) has no idempotency header, so the record's internal
+id is sent as `receipt` and `notes.pshRefundId`; `POST /api/order/refund/sync` (admin) looks a lost request up by that id
+instead of resubmitting, and fails a `requested` record only if Razorpay has none after 30 minutes.
+
+**Webhooks** (signature verified on the raw body, event ids deduplicated): `refund.created`, `refund.processed`,
+`refund.failed`. The payload's own refund status is used (the event name only as a fallback). A refund must match the order's
+payment id, amount and currency (and the recorded request, if any). A refund for a payment on no order, or one that does not
+match, is not applied and is preserved in the `paymentanomalies` collection. Event names follow Razorpay's documented
+catalogue and must be confirmed against real test-mode deliveries.
+
+**Reconciliation** (`utils/paymentReconciliation.js`): finds Razorpay orders created within a bounded window (default 72 h,
+max 168 h) that are `pending`/`authorized`/`failed`/`expired`, plus paid orders on hold, oldest-attempted first, at most
+`limit` (default 25, max 100) per run. For each it calls Razorpay's order-payments API (10 s timeout), validates every
+captured payment's id, order, amount and currency, and settles valid ones through the same `settleCapturedPayment` path as
+the webhook, so repeated runs never deduct stock twice. Mismatched captures are never settled: they are stored as anomalies
+and flag `payment_mismatch` for review. Paid orders on hold are only reported (`needs_review`), never cleared. A 429 aborts
+the run. Gateway errors and incomplete evidence leave the order unchanged. Each attempt is stored on the order
+(`reconciliation`) and each run in `reconciliationruns`. A lease lock (`reconciliationlocks`, 5 min) stops overlapping runs.
+It also re-checks a bounded number of in-flight refunds.
+
+- **Admin:** *Reconcile payments with Razorpay* on the Orders page (`POST /api/order/reconcile`, admin token; optional
+  `orderId` targets one order for recovery).
+- **External scheduler (not active):** `POST /api/order/reconcile/scheduled` with header `x-reconcile-token` equal to the
+  `RECONCILIATION_JOB_TOKEN` environment variable (at least 32 characters). Until that variable is set the endpoint returns 503.
+  No scheduler is configured by this repository; use e.g. a Render cron job or an external HTTP scheduler. The existing 60 s
+  in-process interval only releases expired reservations.
+- **Manual recovery:** an unconfirmed (`requested`) refund â†’ *Check refund status*; a `payment_mismatch`, duplicate or
+  cancelled-order late capture â†’ refund the specific payment from the Payment review panel (Phase 9.8).
+- **Not verified here:** all tests use mocks. Real MongoDB transaction behaviour, Razorpay event ordering and the exact refund
+  response/webhook shapes still need test-mode verification.
+
+### Payment exceptions and admin recovery (Phase 9.8)
+
+- **Payment Exceptions page (admin):** lists `paymentanomalies` (open / under investigation / resolved) and the ten most
+  recent reconciliation runs, with a manual *Run reconciliation now* button that stays disabled while a run is in progress.
+  No automatic scheduler is configured. Endpoints (all admin-authenticated `POST`): `/api/order/anomalies`,
+  `/api/order/anomalies/status`, `/api/order/reconcile/history`, `/api/order/payment-review/detail`.
+- **Anomaly status:** `open â†’ investigating | resolved`, `investigating â†’ open | resolved`, `resolved â†’ open`. A reason of 5â€“120
+  characters is required and each change appends an audit entry. A concurrent change returns 409 `STATUS_CHANGED`. Changing an
+  anomaly status never touches payment status, stock, refunds or fulfilment.
+- **Review resolution (`POST /api/order/payment-review`):** `release` re-reserves stock atomically and deducts it once;
+  `acknowledge` clears a review that has no stock effect. The detail endpoint reports whether each is allowed and why not.
+  Acknowledge is refused with `ACKNOWLEDGE_NOT_ALLOWED` (stock-unavailable on a live order), `REFUND_REQUIRED` (cancelled
+  order whose payment is not confirmed refunded), `ADDITIONAL_PAYMENT_UNREFUNDED` (an extra captured payment still has money
+  not confirmed refunded) and `MISMATCH_UNRESOLVED` (open mismatch anomalies). There is no action that only clears the hold.
+- **Payment-specific refunds:** `POST /api/order/refund` accepts `paymentId`. The payment is fetched from Razorpay and must be
+  captured, in INR, for a positive amount and belong to the order's Razorpay order. It is recorded in `capturedPayments` and
+  accounted separately; the cap is that payment's own remaining balance. A non-primary payment is accepted only while the
+  order is under payment review or the payment is already a registered duplicate/captured payment. Refunds never clear a hold or
+  restock, and the order becomes `refunded` only when every registered captured payment is confirmed fully refunded
+  (webhook or verified sync). Legacy `duplicatePaymentIds` without a `capturedPayments` entry use the order total as their
+  captured amount and do not block the order-level refunded decision.
+- **Cart preservation:** a settled order removes only the purchased quantities from the server cart (conditional per-variant
+  updates, run once per settlement because the `paid` state returns early). Items or quantities added afterwards stay. The
+  storefront reloads the server cart instead of clearing it.
+- **Checkout refresh recovery:** the storefront keeps only an idempotency key and order id in `sessionStorage`. After a refresh it
+  reads the order list from the server and resumes payment only for a Razorpay order that is pending, reserved, unexpired and
+  not on hold; otherwise the stored attempt is discarded. Expired or cancelled Razorpay orders are never reused.
+- **Customer wording:** orders expose a coarse `paymentIssue` (`review`, `stock`, `cancelled_capture`, `duplicate`) and
+  refund status. No gateway text, anomaly ids or payment ids are exposed, and no retry is offered while a capture is held.
+- **Limitations:** the admin JWT carries no admin identity, so audit entries record the actor as `admin`. All tests use mocks;
+  real MongoDB transactions and Razorpay payment/refund responses still need test-mode verification.
 
 ### Notifications
 
@@ -202,3 +318,7 @@ Run backend unit tests with:
 ```powershell
 npm test
 ```
+
+## Delivery PIN-code checker
+
+`GET /api/delivery/check?pincode=NNNNNN` is public and rate-limited. With no provider configured it returns `manual_confirmation` and never a date. Setting `DELIVERY_PROVIDER=shiprocket` plus `SHIPROCKET_EMAIL`, `SHIPROCKET_PASSWORD` and `DELIVERY_PICKUP_PINCODE` enables the Shiprocket lookup (`DELIVERY_HANDLING_DAYS` adds your dispatch time to courier estimates). **The Shiprocket request/response handling is implemented from its documented shape but has NOT been verified against the live API**; test it with real credentials before relying on it. Provider failures return `unavailable` (HTTP 503), never serviceable.

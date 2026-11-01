@@ -1,4 +1,5 @@
 import { recordPaymentStatus } from "./orderFulfillment.js";
+import { applyRefund } from "./refunds.js";
 
 export const codCollectionError = order => {
     if (!order) return "Order not found.";
@@ -22,23 +23,7 @@ export const markCodCollected = (order, actor = "admin") => {
  * so a refund is only ever recorded as successful after Razorpay reports it processed.
  */
 export const applyProcessedRefund = (order, refund) => {
-    if (!refund || typeof refund.id !== "string" || !refund.id) return { error: "Refund payload is invalid." };
-    if (refund.status !== "processed") return { ignored: "not_processed" };
-    if (!Number.isSafeInteger(refund.amount) || refund.amount <= 0) return { error: "Refund amount is invalid." };
-    if (refund.currency && refund.currency !== "INR") return { error: "Refund currency does not match the order." };
-    if (order.paymentMethod !== "Razorpay" || !["paid", "refunded"].includes(order.paymentStatus)) {
-        return { error: "Order has no captured payment to refund." };
-    }
-    if (order.razorpayPaymentId && refund.payment_id && refund.payment_id !== order.razorpayPaymentId) {
-        return { error: "Refund payment does not match the order." };
-    }
-    if ((order.refunds || []).some(item => item.refundId === refund.id)) return { duplicate: true };
-
-    const refundedPaise = (order.refundedPaise || 0) + refund.amount;
-    if (refundedPaise > order.totalPaise) return { error: "Refund exceeds the order total." };
-
-    order.refunds.push({ refundId: refund.id, amountPaise: refund.amount, processedAt: new Date() });
-    order.refundedPaise = refundedPaise;
-    if (refundedPaise === order.totalPaise) recordPaymentStatus(order, "refunded", "system");
-    return { applied: true, fullyRefunded: refundedPaise === order.totalPaise };
+    if (refund && typeof refund.id === "string" && refund.id && refund.status !== "processed") return { ignored: "not_processed" };
+    const result = applyRefund(order, refund);
+    return result.applied ? { applied: true, fullyRefunded: result.fullyRefunded } : result;
 };

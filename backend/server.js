@@ -10,6 +10,7 @@ import productRouter from './routes/productRoute.js'
 import cartRouter from './routes/cartRoute.js'
 import orderRouter from './routes/orderRoute.js'
 import storefrontSettingsRouter from './routes/storefrontSettingsRoute.js'
+import deliveryRouter from './routes/deliveryRoute.js'
 import seoRouter from './routes/seoRoute.js'
 import { releaseExpiredRazorpayReservations } from './controllers/razorpayController.js'
 import { startNotificationWorker } from './utils/notifications/index.js'
@@ -106,6 +107,7 @@ app.use('/api/product',productRouter)
 app.use('/api/cart',cartRouter)
 app.use('/api/order',orderRouter)
 app.use('/api/storefront', storefrontSettingsRouter)
+app.use('/api/delivery', deliveryRouter)
 app.use(seoRouter)
 
 app.get('/',(req,res)=>{

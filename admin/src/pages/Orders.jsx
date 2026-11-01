@@ -5,6 +5,17 @@ import { backendUrl, currency } from '../App'
 import { toast } from 'react-toastify'
 import { assets } from '../assets/assets'
 import OrderActivity from '../components/OrderActivity'
+import RefundPanel from '../components/RefundPanel'
+import PaymentReviewPanel from '../components/PaymentReviewPanel'
+
+const PAYMENT_REVIEW_LABELS = {
+  payment_mismatch: 'Razorpay captured a payment that does not match this order (amount, currency or order id)',
+  stock_unavailable: 'Payment captured but stock is unavailable',
+  inventory_conflict: 'Payment captured but the reservation was invalid',
+  order_cancelled: 'Payment captured on a cancelled order',
+  duplicate_payment: 'A second, different payment was captured',
+  authorized_on_closed_order: 'Payment authorised after the order closed'
+}
 
 const Orders = ({ token }) => {
 
@@ -13,6 +24,21 @@ const Orders = ({ token }) => {
   const [statusFilter, setStatusFilter] = useState('all')
   const [shippingDrafts, setShippingDrafts] = useState({})
   const [savingShippingOrderId, setSavingShippingOrderId] = useState('')
+  const [reconciling, setReconciling] = useState(false)
+  const [reconcileSummary, setReconcileSummary] = useState(null)
+
+  const reconcile = async () => {
+    setReconciling(true)
+    try {
+      const response = await axios.post(backendUrl + '/api/order/reconcile', {}, { headers: { token } })
+      setReconcileSummary(response.data)
+      await fetchAllOrders()
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Reconciliation failed.')
+    } finally {
+      setReconciling(false)
+    }
+  }
 
   const fetchAllOrders = useCallback(async () => {
     if (!token) return
@@ -103,6 +129,18 @@ const Orders = ({ token }) => {
   return (
     <div>
       <h3>Order management</h3>
+      <div className='my-3 border p-3 text-sm'>
+        <button type='button' onClick={reconcile} disabled={reconciling} className='min-h-10 border px-4 py-2 disabled:opacity-50'>
+          {reconciling ? 'Reconciling…' : 'Reconcile payments with Razorpay'}
+        </button>
+        <span className='ml-3 text-stone-600'>Checks recent unpaid orders for payments Razorpay captured but this store never settled. Run manually; no automatic scheduler is configured.</span>
+        {reconcileSummary && (
+          <p className='mt-2'>
+            Examined {reconcileSummary.examined} · {Object.entries(reconcileSummary.counts || {}).map(([name, count]) => `${name.replace(/_/g, ' ')}: ${count}`).join(' · ') || 'nothing to settle'}
+            {reconcileSummary.abortReason ? ` · stopped early (${reconcileSummary.abortReason.replace(/_/g, ' ')})` : ''}
+          </p>
+        )}
+      </div>
       <div className='my-4 flex flex-wrap gap-3'>
         <label className='flex items-center gap-2 text-sm'>
           Payment
@@ -159,7 +197,16 @@ const Orders = ({ token }) => {
                 {order.refundedPaise > 0 && <p>Refunded : {currency}{order.refundedPaise / 100}</p>}
                 {order.razorpayOrderId && <p>Razorpay order : {order.razorpayOrderId}</p>}
                 {order.razorpayPaymentId && <p>Payment reference : {order.razorpayPaymentId}</p>}
-                {order.fulfillmentHold && <p className='mt-1 font-medium text-amber-800'>Payment review hold</p>}
+                {(order.paymentReviewRequired || order.fulfillmentHold) && (
+                  <div role='note' className='mt-2 border border-amber-300 bg-amber-50 p-2 text-amber-900'>
+                    <p className='font-medium'>Payment review required – manual intervention</p>
+                    <p>Reason : {PAYMENT_REVIEW_LABELS[order.paymentReviewReason] || 'Reason not recorded (legacy hold)'}</p>
+                    <p>Payment captured : {['paid', 'refunded'].includes(order.paymentStatus) ? 'Yes' : 'No / not confirmed'}</p>
+                    <p>Stock deducted : {['stock_unavailable', 'inventory_conflict', 'order_cancelled'].includes(order.paymentReviewReason)
+                      ? 'No' : order.paymentReviewReason ? 'Yes' : 'Unknown'}</p>
+                    <p>Not refunded unless the refund shows above.</p>
+                  </div>
+                )}
                 <p>Date : {new Date(order.date).toLocaleDateString()}</p>
               </div>
               <p className='text-sm sm:text-[15px]'>{currency}{order.amount}</p>
@@ -204,6 +251,15 @@ const Orders = ({ token }) => {
                 </button>
               </form>
               <OrderActivity order={order} token={token} onChanged={fetchAllOrders} />
+              <RefundPanel order={order} token={token} onChanged={fetchAllOrders} />
+              {(order.paymentReviewRequired || order.fulfillmentHold) && (
+                <PaymentReviewPanel order={order} token={token} onChanged={fetchAllOrders} />
+              )}
+              {order.reconciliation?.lastAttemptAt && (
+                <p className='col-span-full text-stone-500'>
+                  Last payment reconciliation : {new Date(order.reconciliation.lastAttemptAt).toLocaleString('en-IN')} – {order.reconciliation.lastOutcome}
+                </p>
+              )}
             </div>
           ))
         }

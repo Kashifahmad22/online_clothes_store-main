@@ -8,7 +8,108 @@ const imageRoles = new Set([
     "primary", "full-saree", "border", "pallu", "blouse", "detail", "lifestyle", "other"
 ]);
 
-export const parseProductPayload = (raw) => {
+// Mirrored in admin/src/utils/productAttributes.js and frontend/src/utils/productDisplay.js; a drift test keeps them equal.
+export const PLACEHOLDER_VALUE = /^(?:n\/?a|na|none|null|undefined|nil|tbd|not specified|unknown|-+|\.+)$/i;
+export const MAX_ATTRIBUTE_LENGTH = 80;
+export const MAX_ALT_TEXT_LENGTH = 160;
+const ATTRIBUTE_LABELS = { fabric: "Fabric", colour: "Colour" };
+
+// Trims fabric and colour in place. Both stay optional: blank is allowed, placeholders and non-text are not.
+// Every other key in `details` is left exactly as received.
+// A value that is unchanged from the stored product (`existing`) is a legacy value: it is kept exactly as stored
+// and not re-validated, so an unrelated edit is never blocked by an old placeholder. Changed values are validated.
+const tidy = value => value.replace(/\s+/g, " ").trim();
+const isUnchangedAttribute = (submitted, stored) =>
+    stored !== undefined &&
+    (submitted === stored || (typeof submitted === "string" && typeof stored === "string" && tidy(submitted) === tidy(stored)));
+
+export const normaliseDetailAttributes = (details, existing) => {
+    if (!details) return details;
+    for (const [key, label] of Object.entries(ATTRIBUTE_LABELS)) {
+        if (details[key] === undefined) continue;
+        if (existing && isUnchangedAttribute(details[key], existing[key])) {
+            details[key] = existing[key];
+            continue;
+        }
+        if (details[key] !== null && typeof details[key] !== "string") {
+            throw invalidInput(`${label} must be text.`);
+        }
+        const value = (details[key] ?? "").replace(/\s+/g, " ").trim();
+        if (value && PLACEHOLDER_VALUE.test(value)) {
+            throw invalidInput(`${label} cannot be a placeholder such as "${value}". Leave it blank if unknown.`);
+        }
+        if (value.length > MAX_ATTRIBUTE_LENGTH) {
+            throw invalidInput(`${label} must be ${MAX_ATTRIBUTE_LENGTH} characters or fewer.`);
+        }
+        details[key] = value;
+    }
+    return details;
+};
+
+const cleanAltText = (value, position) => {
+    if (value === undefined || value === null) return "";
+    if (typeof value !== "string") throw invalidInput(`Image ${position} alt text must be text.`);
+    const text = value.replace(/\s+/g, " ").trim();
+    if (text.length > MAX_ALT_TEXT_LENGTH) {
+        throw invalidInput(`Image ${position} alt text must be ${MAX_ALT_TEXT_LENGTH} characters or fewer.`);
+    }
+    return text;
+};
+
+export const parseImageAlts = (raw, fileCount) => {
+    if (!raw) return Array.from({ length: fileCount }, () => "");
+    let alts;
+    try {
+        alts = JSON.parse(raw);
+    } catch {
+        throw invalidInput("Image alt text must be valid JSON.");
+    }
+    if (!Array.isArray(alts) || alts.length !== fileCount) {
+        throw invalidInput("Provide one alt text for each uploaded image.");
+    }
+    return alts.map((alt, index) => cleanAltText(alt, index + 1));
+};
+
+// Final stored order: the submitted order, except that the single primary image is always first.
+// `order` is the array index, so ordering is stable after save and reload.
+// A newly saved collection must have exactly one primary image.
+export const assembleImages = images => {
+    const cleaned = images.map((image, index) => ({
+        url: image.url,
+        role: image.role || "other",
+        altText: cleanAltText(image.altText, index + 1)
+    }));
+    const primaries = cleaned.filter(image => image.role === "primary");
+    if (primaries.length > 1) {
+        throw invalidInput("Choose only one primary image.");
+    }
+    if (cleaned.length > 0 && primaries.length === 0) {
+        throw invalidInput("Choose one primary image.");
+    }
+    const ordered = primaries.length ? [primaries[0], ...cleaned.filter(image => image !== primaries[0])] : cleaned;
+    return ordered.map((image, order) => ({ ...image, order }));
+};
+
+// True when an edit leaves the saved images exactly as stored (same files, roles, alt text and order, no uploads).
+// Such a save keeps legacy image metadata untouched instead of re-validating it.
+export const imagesUnchanged = (submitted, stored, uploadCount = 0) =>
+    uploadCount === 0 &&
+    Array.isArray(submitted) && Array.isArray(stored) &&
+    submitted.length === stored.length &&
+    submitted.every((image, index) =>
+        image?.url === stored[index].url &&
+        (image.role || "other") === (stored[index].role || "other") &&
+        (image.altText || "") === (stored[index].altText || ""));
+
+export const keepStoredImages = stored => stored.map((image, index) => ({
+    url: image.url,
+    role: image.role || "other",
+    altText: typeof image.altText === "string" ? image.altText : "",
+    order: Number.isInteger(image.order) ? image.order : index
+}));
+
+// `deferAttributes` lets an update validate fabric/colour against the stored product instead (see updateProduct).
+export const parseProductPayload = (raw, { deferAttributes = false } = {}) => {
     let product;
     try {
         product = typeof raw === "string" ? JSON.parse(raw) : raw;
@@ -48,6 +149,7 @@ export const parseProductPayload = (raw) => {
         (!product.details || typeof product.details !== "object" || Array.isArray(product.details))) {
         throw invalidInput("Product details must be a key/value object.");
     }
+    if (!deferAttributes) normaliseDetailAttributes(product.details);
     if (product.status !== undefined && !    ["draft", "published", "archived"].includes(product.status)) {
             throw invalidInput("Product status must be draft, published, or archived.");
     }

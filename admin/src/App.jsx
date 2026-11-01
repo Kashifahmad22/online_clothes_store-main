@@ -5,6 +5,7 @@ import { Routes, Route } from 'react-router-dom'
 import Add from './pages/Add'
 import List from './pages/List'
 import Orders from './pages/Orders'
+import PaymentExceptions from './pages/PaymentExceptions'
 import Settings from './pages/Settings'
 import Login from './components/Login'
 import { ToastContainer, toast } from 'react-toastify';
@@ -46,11 +47,12 @@ const App = () => {
           <hr />
           <div className='flex w-full'>
             <Sidebar />
-            <div className='w-[70%] mx-auto ml-[max(5vw,25px)] my-8 text-gray-600 text-base'>
+            <div className='w-[70%] min-w-0 mx-auto ml-[max(5vw,25px)] my-8 text-gray-600 text-base'>
               <Routes>
                 <Route path='/add' element={<Add token={token} />} />
                 <Route path='/list' element={<List token={token} />} />
                 <Route path='/orders' element={<Orders token={token} />} />
+                <Route path='/payment-exceptions' element={<PaymentExceptions token={token} />} />
                 <Route path='/settings' element={<Settings token={token} />} />
               </Routes>
             </div>

@@ -1,11 +1,14 @@
 import { useContext, useEffect, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
-import CartTotal from '../components/CartTotal'
+import CheckoutSummary from '../components/CheckoutSummary'
 import { ShopContext } from '../context/ShopContext'
 import axios from 'axios'
 import { toast } from 'react-toastify'
 import { openRazorpayCheckout } from '../utils/razorpayCheckout'
 import { validateCheckoutAddress } from '../utils/checkoutValidation'
+import {
+    clearPendingCheckout, isRecoverableOrder, readPendingCheckout, savePendingCheckout
+} from '../utils/pendingCheckout'
 
 const Field = ({ label, name, error, hint, type = 'text', ...inputProps }) => (
     <div className='checkout-field'>
@@ -29,7 +32,7 @@ Field.propTypes = {
 
 const PlaceOrder = () => {
     const {
-        navigate, backendUrl, token, cartItems, setCartItems, products, siteSettings
+        navigate, backendUrl, token, cartItems, setCartItems, refreshCart, products, siteSettings
     } = useContext(ShopContext)
     const [submitting, setSubmitting] = useState(false)
     const [paymentMethod, setPaymentMethod] = useState('COD')
@@ -38,6 +41,8 @@ const PlaceOrder = () => {
     const [errors, setErrors] = useState({})
     const checkoutRequestKey = useRef(null)
     const codCheckoutRequestKey = useRef(null)
+    const submitLock = useRef(false)
+    const [summaryState, setSummaryState] = useState('loading')
     const [formData, setFormData] = useState({
         firstName: '',
         lastName: '',
@@ -53,6 +58,45 @@ const PlaceOrder = () => {
     useEffect(() => {
         if (!token) navigate('/login', { replace: true, state: { from: '/place-order' } })
     }, [navigate, token])
+
+    // The server removes only purchased quantities, so reload the cart rather than emptying it.
+    const syncCart = async () => {
+        if (refreshCart) await refreshCart()
+        else setCartItems({})
+    }
+
+    // After a refresh, rebuild the pending payment from server state; stored ids are never trusted.
+    useEffect(() => {
+        if (!token) return undefined
+        const stored = readPendingCheckout()
+        if (!stored) return undefined
+        if (stored.idempotencyKey) checkoutRequestKey.current = stored.idempotencyKey
+        if (!stored.orderId) return undefined
+        let cancelled = false
+        ;(async () => {
+            try {
+                const list = await axios.post(`${backendUrl}/api/order/userorders`, {}, { headers: { token } })
+                const order = (list.data.orders || []).find(item => item._id === stored.orderId)
+                if (!isRecoverableOrder(order)) {
+                    clearPendingCheckout()
+                    checkoutRequestKey.current = null
+                    return
+                }
+                const retry = await axios.post(`${backendUrl}/api/order/razorpay/retry`,
+                    { orderId: stored.orderId }, { headers: { token } })
+                if (cancelled) return
+                if (!retry.data.success) throw new Error('not payable')
+                setPaymentMethod('Razorpay')
+                setPendingPaymentOrder(retry.data)
+            } catch (error) {
+                if (error.response) {
+                    clearPendingCheckout()
+                    checkoutRequestKey.current = null
+                }
+            }
+        })()
+        return () => { cancelled = true }
+    }, [backendUrl, token])
 
     const onChangeHandler = event => {
         const { name, value } = event.target
@@ -95,9 +139,10 @@ const PlaceOrder = () => {
                             { headers: { token } }
                         )
                         if (response.data.success && response.data.paymentStatus === 'paid') {
-                            setCartItems({})
+                            await syncCart()
                             setPendingPaymentOrder(null)
                             checkoutRequestKey.current = null
+                            clearPendingCheckout()
                             toast.success(response.data.message || 'Payment confirmed.')
                             navigate('/orders')
                             return
@@ -149,7 +194,7 @@ const PlaceOrder = () => {
 
     const onSubmitHandler = async event => {
         event.preventDefault()
-        if (submitting) return
+        if (submitting || submitLock.current) return
         if (!token) {
             navigate('/login', { state: { from: '/place-order' } })
             return
@@ -178,18 +223,21 @@ const PlaceOrder = () => {
             return
         }
 
+        submitLock.current = true
         setSubmitting(true)
         try {
             if (paymentMethod === 'Razorpay') {
                 if (!checkoutRequestKey.current) {
                     checkoutRequestKey.current = crypto.randomUUID()
                 }
+                savePendingCheckout({ idempotencyKey: checkoutRequestKey.current })
                 const response = await axios.post(
                     `${backendUrl}/api/order/razorpay`,
                     { items, address: formData, idempotencyKey: checkoutRequestKey.current, whatsappOptIn },
                     { headers: { token } }
                 )
                 if (!response.data.success) throw new Error(response.data.message || 'Unable to prepare online payment.')
+                savePendingCheckout({ idempotencyKey: checkoutRequestKey.current, orderId: response.data.orderId })
                 setPendingPaymentOrder(response.data)
                 setSubmitting(false)
                 await openPayment(response.data)
@@ -207,18 +255,23 @@ const PlaceOrder = () => {
                 },
                 { headers: { token } }
             )
-            if (!response.data.success) throw new Error(response.data.message)
-            setCartItems({})
+            if (!response.data.success || !response.data.order?._id) {
+                throw new Error(response.data.message || 'We could not confirm your order. Please check your orders before trying again.')
+            }
+            const placedOrder = response.data.order
+            await syncCart()
             codCheckoutRequestKey.current = null
             toast.success('Order placed. Payment is due on delivery.')
-            navigate('/orders')
+            navigate(`/order-confirmation/${encodeURIComponent(placedOrder._id)}`, { state: { order: placedOrder } })
         } catch (error) {
             if (error.response?.status === 409 &&
                 error.response?.data?.message?.includes('start a new checkout')) {
                 checkoutRequestKey.current = null
+                clearPendingCheckout()
             }
             toast.error(error.response?.data?.message || error.message || 'Unable to place order.')
         } finally {
+            submitLock.current = false
             setSubmitting(false)
         }
     }
@@ -269,7 +322,7 @@ const PlaceOrder = () => {
 
             <aside className='checkout-summary'>
                 <h2 className='checkout-heading'>Order summary</h2>
-                <CartTotal />
+                <CheckoutSummary onStatusChange={setSummaryState} />
                 <fieldset className='mt-8'>
                     <legend className='checkout-heading'>Payment method</legend>
                     <label className={`checkout-option ${paymentMethod === 'COD' ? 'checkout-option--selected' : ''}`}>
@@ -310,7 +363,7 @@ const PlaceOrder = () => {
                         </p>
                     )}
                     <div className='mt-6'>
-                        <button disabled={submitting} type='submit' aria-busy={submitting}
+                        <button disabled={submitting || (summaryState === 'issues' && !pendingPaymentOrder)} type='submit' aria-busy={submitting}
                             className='min-h-12 w-full bg-rose-950 px-6 py-3 text-sm font-semibold uppercase tracking-wide text-white disabled:opacity-50'>
                             {submitting
                                 ? 'Processing…'

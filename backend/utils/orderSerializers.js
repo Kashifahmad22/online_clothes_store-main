@@ -1,4 +1,6 @@
 import { allowedNextStatuses } from "./orderFulfillment.js";
+import { adminRefundView, customerRefundStatus } from "./refunds.js";
+import { effectiveReviewReason } from "./paymentStateMachine.js";
 
 const plainOrder = order => (order?.toObject ? order.toObject() : order);
 
@@ -15,7 +17,28 @@ export const withDisplayAmounts = order => {
 
 export const serializeAdminOrder = order => {
     const data = withDisplayAmounts(order);
-    return { ...data, allowedStatuses: allowedNextStatuses(data) };
+    // Replaces the raw refund records so idempotency keys never reach the browser.
+    return { ...data, ...adminRefundView(data), allowedStatuses: allowedNextStatuses(data) };
+};
+
+// Customer-facing reference derived from the order id (last 12 hex characters), so no schema change is needed.
+// It is a display aid, not a guaranteed-unique key. Mirrors frontend formatOrderReference exactly.
+export const orderReference = id => {
+    const value = String(id ?? "");
+    return /^[0-9a-f]{12,}$/i.test(value) ? `PSH-${value.slice(-12).toUpperCase()}` : "";
+};
+
+// Coarse customer-safe category for an order under payment review. The internal reason, gateway data and anomaly
+// ids are never exposed; the category only selects which reassuring message the customer sees.
+export const customerPaymentIssue = data => {
+    if (!data.paymentReviewRequired && !data.fulfillmentHold) return "";
+    switch (effectiveReviewReason(data)) {
+        case "stock_unavailable":
+        case "inventory_conflict": return "stock";
+        case "order_cancelled": return "cancelled_capture";
+        case "duplicate_payment": return "duplicate";
+        default: return "review";
+    }
 };
 
 // Explicit allow-list: internal notes, review flags, idempotency keys and gateway identifiers never reach customers.
@@ -24,6 +47,7 @@ export const serializeCustomerOrder = order => {
     const shipping = data.shipping || {};
     return {
         _id: data._id,
+        orderReference: orderReference(data._id),
         date: data.date,
         createdAt: data.createdAt,
         items: data.items.map(item => ({
@@ -47,7 +71,9 @@ export const serializeCustomerOrder = order => {
         paymentStatus: data.paymentStatus,
         paidAt: data.paidAt,
         refundedPaise: data.refundedPaise || 0,
+        refundStatus: customerRefundStatus(data),
         fulfillmentHold: Boolean(data.fulfillmentHold),
+        paymentIssue: customerPaymentIssue(data),
         reservationHeld: Boolean(data.reservationHeld),
         reservationExpiresAt: data.reservationExpiresAt,
         shipping: {

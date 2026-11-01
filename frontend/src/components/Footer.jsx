@@ -5,7 +5,7 @@ import { useContext } from 'react'
 import { ShopContext } from '../context/ShopContext'
 import { policyPages } from '../config/policies'
 import { getWhatsAppSupportUrl } from '../config/support'
-import { storefrontNavigation } from '../config/productCategories'
+import { catalogueState, storefrontNavigation } from '../config/productCategories'
 import MadhubaniArtwork from './MadhubaniArtwork'
 
 const FooterLink = ({ link }) => link.url.startsWith('/')
@@ -13,7 +13,7 @@ const FooterLink = ({ link }) => link.url.startsWith('/')
   : <a href={link.url} target='_blank' rel='noreferrer'>{link.label}</a>
 
 const Footer = () => {
-  const { products, siteSettings, siteSettingsError } = useContext(ShopContext)
+  const { products, productsLoading, productsError, siteSettings, siteSettingsError } = useContext(ShopContext)
   const { brand, legal, support, shipping, checkout } = siteSettings
   const activeCampaigns = campaigns.filter(campaign =>
     products.some(product => (product.collections || []).includes(campaign.collectionTag))
@@ -28,7 +28,7 @@ const Footer = () => {
       .map(page => ({ label: page.label, url: page.path })),
     ...configuredPolicyLinks
   ]
-  const categories = storefrontNavigation(products)
+  const categories = storefrontNavigation(products, catalogueState({ productsLoading, productsError }))
   const listedShopUrls = new Set(shopLinks.map(link => link.url))
   const availableCategoryLinks = categories.filter(category =>
     category.status === 'upcoming' || !listedShopUrls.has(`/category/${category.slug}`))

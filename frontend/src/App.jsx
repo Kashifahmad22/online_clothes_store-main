@@ -16,6 +16,8 @@ import SearchBar from './components/SearchBar'
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import Verify from './pages/Verify'
+import NotFound from './pages/NotFound'
+import OrderConfirmation from './pages/OrderConfirmation'
 import Policy from './pages/Policy'
 import { policyPages } from './config/policies'
 import { applyPageMeta, buildPageMeta, normaliseSiteUrl } from './utils/seo'
@@ -89,6 +91,8 @@ const App = () => {
           <Route path='/place-order' element={<PlaceOrder />} />
           <Route path='/orders' element={<Orders />} />
           <Route path='/verify' element={<Verify />} />
+          <Route path='/order-confirmation/:orderId' element={<OrderConfirmation />} />
+          <Route path='*' element={<NotFound />} />
         </Routes>
       </div>
       <Footer />

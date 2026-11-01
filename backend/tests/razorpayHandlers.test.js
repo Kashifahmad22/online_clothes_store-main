@@ -6,6 +6,7 @@ import orderModel from "../models/orderModel.js";
 import userModel from "../models/userModel.js";
 import productVariantModel from "../models/productVariantModel.js";
 import razorpayWebhookEventModel from "../models/razorpayWebhookEventModel.js";
+import paymentAnomalyModel from "../models/paymentAnomalyModel.js";
 import notificationEventModel from "../models/notificationEventModel.js";
 import { notifications } from "../utils/notifications/index.js";
 import {
@@ -159,6 +160,7 @@ beforeEach(() => {
         webhookEventIds.add(doc.eventId);
     });
     mock.method(userModel, "updateOne", async () => ({ modifiedCount: 1 }));
+    mock.method(paymentAnomalyModel, "updateOne", async () => ({ upsertedCount: 1 }));
     mock.method(productVariantModel, "exists", () => query(true));
     mock.method(productVariantModel, "updateOne", async () => { variantUpdates += 1; return { modifiedCount: 1 }; });
     mock.method(notificationEventModel, "updateOne", async (filter, update) => {
@@ -362,12 +364,12 @@ test("a refund that is not yet processed is ignored", async () => {
     assert.equal(staged.length, 0);
 });
 
-test("payment.failed releases the reservation and marks the payment failed without confirming the order", async () => {
+test("payment.failed records the failure but keeps the reservation and never confirms the order", async () => {
     const res = await sendWebhook(paymentEvent("payment.failed", capturedPayment({ status: "failed" })), "evt_fail");
     assert.equal(res.body.result, "processed");
     assert.equal(order.paymentStatus, "failed");
-    assert.equal(order.reservationHeld, false);
-    assert.equal(variantUpdates, 1);
+    assert.equal(order.reservationHeld, true, "the customer may still pay in the same Razorpay modal");
+    assert.equal(variantUpdates, 0, "a failed attempt performs no stock write");
     assert.equal(staged.length, 0, "no success notification for a failed payment");
 });
 

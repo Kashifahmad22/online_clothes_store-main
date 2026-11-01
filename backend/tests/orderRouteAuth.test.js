@@ -11,7 +11,7 @@ const middlewareFor = path => {
 };
 
 test("order management and notification endpoints require admin authentication", () => {
-    for (const path of ["/list", "/status", "/shipping", "/cod-collected", "/notifications", "/notifications/retry"]) {
+    for (const path of ["/list", "/status", "/shipping", "/cod-collected", "/payment-review", "/refund", "/refund/sync", "/reconcile", "/reconcile/history", "/payment-review/detail", "/anomalies", "/anomalies/status", "/notifications", "/notifications/retry"]) {
         assert.equal(middlewareFor(path)[0], adminAuth, path);
     }
 });

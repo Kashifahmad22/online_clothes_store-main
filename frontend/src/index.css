@@ -884,6 +884,30 @@ summary:focus-visible {
   color: #886b43;
 }
 
+.product-card__attributes {
+  margin: -2px 0 6px;
+  overflow: hidden;
+  color: #786e64;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-card__low-stock {
+  margin: 6px 0 0;
+  color: #8a3a1f;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.product-price__from {
+  color: #786e64;
+  font-size: .75em;
+  font-weight: 500;
+}
+
 .merch-badges {
   display: flex;
   flex-wrap: wrap;
@@ -1586,7 +1610,8 @@ summary:focus-visible {
     #eee7dc;
 }
 
-.order-line__details h2 {
+.order-line__details h2,
+.order-line__details h3 {
   margin: 0;
   color: var(--wine-dark);
   font-family: Outfit, sans-serif;
@@ -1794,6 +1819,99 @@ summary:focus-visible {
 .product-breadcrumb span {
   padding: 0 5px;
   color: var(--gold);
+}
+
+.product-breadcrumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.product-breadcrumbs li {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+}
+
+.product-breadcrumbs li + li::before {
+  content: "/";
+  padding: 0 5px;
+  color: var(--gold);
+  font-size: 11px;
+}
+
+.product-breadcrumbs__current {
+  display: inline;
+  color: #4a4039;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.product-trust {
+  margin-top: 28px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+}
+
+.product-trust__heading {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  margin: 0;
+  color: var(--wine-dark);
+  font-family: Prata, Georgia, serif;
+  font-size: 19px;
+  font-weight: 400;
+}
+
+.product-trust dl > div {
+  display: grid;
+  grid-template-columns: minmax(80px, .6fr) 1.4fr;
+  gap: 12px;
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+}
+
+.product-trust dt {
+  color: #61574f;
+  font-weight: 500;
+}
+
+.product-trust dd {
+  margin: 0;
+  color: #766b62;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.product-trust dd p {
+  margin: 0;
+}
+
+.product-trust a {
+  display: inline-block;
+  max-width: 100%;
+  padding: 12px 0;
+  color: var(--wine);
+  overflow-wrap: anywhere;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.product-trust__muted,
+.product-trust__note {
+  color: #766b62;
+}
+
+.product-trust__links {
+  margin: 0;
+  padding: 0 0 8px;
+  list-style: none;
 }
 
 .product-kicker {
@@ -2643,3 +2761,76 @@ summary:focus-visible {
   display: flex;
   justify-content: center;
 }
+
+.order-totals {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 16px;
+  margin: 16px 0 0;
+  font-size: 14px;
+}
+
+.order-totals dt { color: var(--muted); }
+.order-totals dd { margin: 0; text-align: right; }
+
+.order-totals__total {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--wine-dark) !important;
+  font-weight: 700;
+}
+
+.order-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 18px;
+  margin-top: 20px;
+  font-size: 13px;
+}
+
+.order-meta h3 {
+  margin: 0 0 6px;
+  color: var(--wine-dark);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.order-meta p,
+.order-meta address { margin: 0 0 4px; color: var(--muted); font-style: normal; overflow-wrap: anywhere; }
+
+.order-confirmation__summary {
+  margin-bottom: 18px;
+  padding: 16px 18px;
+  border-left: 3px solid var(--gold);
+  background: #fbf6ec;
+  font-size: 14px;
+}
+
+.order-confirmation__summary p { margin: 0 0 6px; }
+
+.checkout-lines__list { margin: 0; padding: 0; list-style: none; }
+
+.checkout-line {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.checkout-line > img,
+.checkout-line > .order-line__image-placeholder {
+  width: 56px;
+  height: 72px;
+  object-fit: cover;
+  background: #eee7dc;
+}
+
+.checkout-line p { margin: 0; }
+.checkout-line__name { color: var(--wine-dark); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.checkout-line__meta { margin-top: 3px !important; color: var(--muted); font-size: 12px; }
+.checkout-line__issue { margin-top: 3px !important; color: #9b1c1c; font-size: 12px; font-weight: 600; }
+.checkout-line__total { font-size: 13px; font-weight: 600; white-space: nowrap; }

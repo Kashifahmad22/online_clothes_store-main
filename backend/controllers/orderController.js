@@ -23,6 +23,17 @@ import {
     recordFulfilmentStatus
 } from "../utils/orderFulfillment.js";
 import { markCodCollected } from "../utils/orderPayments.js";
+import { removePurchasedFromCart } from "../utils/cartPurchase.js";
+import { reviewState } from "../utils/paymentReview.js";
+import paymentAnomalyModel from "../models/paymentAnomalyModel.js";
+import { deductAvailableStock } from "../utils/orderStock.js";
+import {
+    REVIEW_REASONS,
+    STOCK_NOT_DEDUCTED_REASONS,
+    effectiveReviewReason,
+    flagReview,
+    transitionPayment
+} from "../utils/paymentStateMachine.js";
 import { serializeAdminOrder, serializeCustomerOrder } from "../utils/orderSerializers.js";
 import { dispatchNotifications, notifications, stageNotification } from "../utils/notifications/index.js";
 
@@ -92,6 +103,68 @@ export const buildOrderItems = async (items, session) => {
 };
 
 const serializeOrder = serializeCustomerOrder;
+
+// Read-only price/stock confirmation for the checkout summary. Nothing is reserved or written.
+const quoteOrder = async (req, res) => {
+    const items = req.body?.items;
+    if (!Array.isArray(items) || items.length === 0 || items.length > 50) {
+        return res.status(400).json({ success: false, message: "Cart must contain between 1 and 50 distinct items." });
+    }
+    const seen = new Set();
+    for (const item of items) {
+        const { productId, variantId, quantity } = item || {};
+        if (!mongoose.Types.ObjectId.isValid(productId) || !mongoose.Types.ObjectId.isValid(variantId) ||
+            !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 99 || seen.has(String(variantId))) {
+            return res.status(400).json({ success: false, message: "Cart contains an invalid product, variant, or quantity." });
+        }
+        seen.add(String(variantId));
+    }
+
+    try {
+        const [products, variants, settings] = await Promise.all([
+            productModel.find({ _id: { $in: items.map(item => item.productId) }, status: "published" }),
+            productVariantModel.find({ _id: { $in: items.map(item => item.variantId) }, active: true }),
+            storefrontSettingsModel.findOne({ key: "primary" })
+        ]);
+        const productsById = new Map(products.map(product => [product._id.toString(), product]));
+        const variantsById = new Map(variants.map(variant => [variant._id.toString(), variant]));
+
+        const lines = items.map(({ productId, variantId, quantity }) => {
+            const product = productsById.get(String(productId));
+            const variant = variantsById.get(String(variantId));
+            if (!product || !variant || variant.productId.toString() !== String(productId)) {
+                return { productId, variantId, quantity, status: "unavailable" };
+            }
+            const unitPricePaise = variant.priceOverridePaise ?? product.pricePaise;
+            const available = Math.max(0, variant.stockOnHand - (variant.reserved || 0));
+            const options = variant.options instanceof Map ? Object.fromEntries(variant.options) : { ...(variant.options || {}) };
+            return {
+                productId, variantId, quantity,
+                name: product.name,
+                image: product.images?.[0]?.url || "",
+                options,
+                unitPricePaise,
+                lineTotalPaise: unitPricePaise * quantity,
+                status: available >= quantity ? "ok" : "insufficient",
+                availableQuantity: available >= quantity ? undefined : available
+            };
+        });
+        const priced = lines.filter(line => Number.isSafeInteger(line.unitPricePaise));
+        const subtotalPaise = priced.reduce((sum, line) => sum + line.lineTotalPaise, 0);
+        const shippingPaise = calculateShippingPaise(subtotalPaise, settings?.shipping);
+        return res.json({
+            success: true,
+            lines,
+            subtotalPaise,
+            shippingPaise,
+            totalPaise: subtotalPaise + shippingPaise,
+            hasIssues: lines.some(line => line.status !== "ok")
+        });
+    } catch (error) {
+        console.error("Checkout quote failed:", { name: error.name || "Error" });
+        return res.status(error.status || 500).json({ success: false, message: "Unable to confirm prices right now." });
+    }
+};
 
 const placeOrder = async (req, res) => {
     const body = req.body || {};
@@ -171,11 +244,7 @@ const placeOrder = async (req, res) => {
                 ...whatsappConsentFields(body),
                 date: Date.now()
             }], { session });
-            await userModel.updateOne(
-                { _id: req.auth.userId },
-                { $set: { cartData: {} } },
-                { session }
-            );
+            await removePurchasedFromCart(req.auth.userId, items, session);
             await stageNotification(saved, "order_placed", { session });
             savedOrder = saved;
         });
@@ -248,6 +317,51 @@ const userOrders = async (req, res) => {
     }
 };
 
+const statusError = (message, status, code) => Object.assign(new Error(message), { status, code });
+
+// Cancels a prepaid order without leaving it payable and without discarding evidence of a payment.
+// It never marks anything refunded: only a Razorpay-confirmed refund event does that.
+const cancelPrepaidOrder = async (order, session) => {
+    if (order.paymentStatus === "paid") {
+        const stockNotDeducted = order.fulfillmentHold &&
+            STOCK_NOT_DEDUCTED_REASONS.includes(effectiveReviewReason(order));
+        if (!stockNotDeducted) {
+            throw statusError(
+                "Paid prepaid orders cannot be cancelled until a refund workflow is available.",
+                409,
+                "PAID_ORDER_REQUIRES_REFUND"
+            );
+        }
+        // Paid, no stock was ever deducted: cancelling changes no stock and keeps the payment under review.
+        flagReview(order, REVIEW_REASONS.ORDER_CANCELLED, {
+            note: "Order cancelled while its payment was under review. The payment has not been refunded."
+        });
+        return;
+    }
+    if (order.paymentStatus === "refunded") return;
+
+    if (order.reservationHeld) {
+        for (const item of order.items) {
+            const result = await productVariantModel.updateOne({
+                _id: item.variantId,
+                reserved: { $gte: item.quantity }
+            }, { $inc: { reserved: -item.quantity } }, { session });
+            if (result.modifiedCount !== 1) {
+                throw new Error("Unable to safely release stock for the cancelled prepaid order.");
+            }
+        }
+        order.reservationHeld = false;
+    }
+    if (order.paymentStatus === "authorized") {
+        // The gateway may still capture this payment, so the evidence stays visible and the order stays flagged.
+        flagReview(order, REVIEW_REASONS.AUTHORIZED_ON_CLOSED_ORDER, {
+            note: "Order cancelled while a payment was authorized; check Razorpay before any refund."
+        });
+    } else if (order.paymentStatus === "pending" || order.paymentStatus === "failed") {
+        transitionPayment(order, "expired", { actor: "admin", note: "Order cancelled; payment no longer accepted." });
+    }
+};
+
 const updateStatus = async (req, res) => {
     const body = req.body || {};
     const { orderId, status } = body;
@@ -283,13 +397,9 @@ const updateStatus = async (req, res) => {
                 );
             }
             if (status === "Cancelled") {
-                if (order.paymentMethod === "Razorpay" && order.paymentStatus === "paid") {
-                    throw Object.assign(
-                        new Error("Paid prepaid orders cannot be cancelled until a refund workflow is available."),
-                        { status: 409 }
-                    );
-                }
-                if (order.paymentMethod === "COD") {
+                if (order.paymentMethod === "Razorpay") {
+                    await cancelPrepaidOrder(order, session);
+                } else if (order.paymentMethod === "COD") {
                     for (const item of order.items) {
                         const result = await productVariantModel.updateOne(
                             { _id: item.variantId },
@@ -300,17 +410,6 @@ const updateStatus = async (req, res) => {
                             throw new Error("Unable to safely restore stock for the cancelled COD order.");
                         }
                     }
-                } else if (order.reservationHeld) {
-                    for (const item of order.items) {
-                        const result = await productVariantModel.updateOne({
-                            _id: item.variantId,
-                            reserved: { $gte: item.quantity }
-                        }, { $inc: { reserved: -item.quantity } }, { session });
-                        if (result.modifiedCount !== 1) {
-                            throw new Error("Unable to safely release stock for the cancelled prepaid order.");
-                        }
-                    }
-                    order.reservationHeld = false;
                 }
             }
             if (status === "Shipped") {
@@ -325,7 +424,11 @@ const updateStatus = async (req, res) => {
         return res.json({ success: true, message: "Order status updated." });
     } catch (error) {
         if (error.status) {
-            return res.status(error.status).json({ success: false, message: error.message });
+            return res.status(error.status).json({
+                success: false,
+                message: error.message,
+                ...(error.code ? { code: error.code } : {})
+            });
         }
         console.error("Order status update failed:", { name: error.name || "Error" });
         return res.status(500).json({ success: false, message: "Unable to update order status." });
@@ -364,6 +467,74 @@ const updateShipping = async (req, res) => {
     } catch (error) {
         console.error("Shipping details update failed:", { name: error.name || "Error" });
         return res.status(500).json({ success: false, message: "Unable to update shipping details." });
+    }
+};
+
+// Explicit, audited resolution of a payment review. `release` re-acquires stock atomically before an order
+// can be fulfilled; `acknowledge` clears a review that does not affect stock. Neither refunds anything.
+const resolvePaymentReview = async (req, res) => {
+    const { orderId, action } = req.body || {};
+    const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+    if (!mongoose.Types.ObjectId.isValid(orderId) || !["release", "acknowledge"].includes(action)) {
+        return res.status(400).json({ success: false, code: "INVALID_REQUEST", message: "Invalid order or review action." });
+    }
+    if (reason.length < 5 || reason.length > 120 || /[\u0000-\u001f\u007f]/.test(reason)) {
+        return res.status(400).json({
+            success: false,
+            code: "REASON_REQUIRED",
+            message: "Enter a reason of 5 to 120 characters for this review decision."
+        });
+    }
+
+    let session;
+    try {
+        session = await mongoose.startSession();
+        await session.withTransaction(async () => {
+            const order = await orderModel.findById(orderId).session(session);
+            if (!order || order.paymentMethod !== "Razorpay") throw statusError("Order not found.", 404, "ORDER_NOT_FOUND");
+            if (!order.fulfillmentHold && !order.paymentReviewRequired) {
+                throw statusError("This order has no payment review pending.", 409, "NO_REVIEW_PENDING");
+            }
+            const reviewReason = effectiveReviewReason(order);
+            const openMismatchCount = reviewReason === REVIEW_REASONS.PAYMENT_MISMATCH
+                ? await paymentAnomalyModel.countDocuments({
+                    orderId: String(order._id),
+                    kind: "captured_payment_mismatch",
+                    investigationStatus: { $ne: "resolved" }
+                })
+                : 0;
+            const state = reviewState(order, { openMismatchCount });
+            const decision = action === "release" ? state.release : state.acknowledge;
+            if (!decision.allowed) throw statusError(decision.message, 409, decision.code);
+
+            if (action === "release" && !await deductAvailableStock(order.items, session)) {
+                throw statusError(
+                    "Stock is still unavailable for this paid order. Receive stock first, or cancel the order.",
+                    409,
+                    "STOCK_UNAVAILABLE"
+                );
+            }
+            order.fulfillmentHold = false;
+            order.paymentReviewRequired = false;
+            order.paymentReviewReason = "";
+            order.statusHistory.push(historyEntry({
+                kind: "payment",
+                from: order.paymentStatus,
+                to: order.paymentStatus,
+                actor: "admin",
+                note: `Review ${action === "release" ? "released" : "acknowledged"} (${reviewReason}): ${reason}`.slice(0, 200)
+            }));
+            await order.save({ session });
+        });
+        return res.json({ success: true, message: "Payment review recorded." });
+    } catch (error) {
+        if (error.status) {
+            return res.status(error.status).json({ success: false, code: error.code, message: error.message });
+        }
+        console.error("Payment review update failed:", { name: error.name || "Error" });
+        return res.status(500).json({ success: false, message: "Unable to update the payment review." });
+    } finally {
+        if (session) await session.endSession();
     }
 };
 
@@ -419,7 +590,9 @@ export {
     orderNotifications,
     paymentUnavailable,
     placeOrder,
+    quoteOrder,
     retryNotification,
+    resolvePaymentReview,
     updateShipping,
     updateStatus,
     userOrders

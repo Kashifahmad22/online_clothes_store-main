@@ -3,13 +3,13 @@ import { Link } from 'react-router-dom'
 import ProductPrice from './ProductPrice'
 import OptimizedImage from './OptimizedImage'
 import MerchandisingBadges from './MerchandisingBadges'
-import { getAvailableStock, getProductImage, getStartingPrice } from '../utils/productDisplay'
+import { getAvailableStock, getCardAttributes, getPriceSummary, getProductImage, showLowStockNote } from '../utils/productDisplay'
 
 const ProductItem = ({ product }) => {
   const image = getProductImage(product)
-  const price = getStartingPrice(product)
+  const { price, from, mrp } = getPriceSummary(product)
   const availableStock = getAvailableStock(product)
-  const mrp = Number.isFinite(product.mrp) && product.mrp > price ? product.mrp : null
+  const attributes = getCardAttributes(product)
 
   return (
     <Link
@@ -35,8 +35,10 @@ const ProductItem = ({ product }) => {
         <p className='line-clamp-2 min-h-10 text-sm font-medium leading-5 text-stone-900 sm:text-base'>
           {product.name}
         </p>
-        <ProductPrice price={price} mrp={mrp} compact />
-        <MerchandisingBadges product={product} className='merch-badges--card' />
+        {attributes.length > 0 && <p className='product-card__attributes'>{attributes.join(' · ')}</p>}
+        <ProductPrice price={price} mrp={mrp} from={from} compact />
+        <MerchandisingBadges product={product} className='merch-badges--card' hideLowStock />
+        {showLowStockNote(product) && <p className='product-card__low-stock'>Only a few left</p>}
       </div>
     </Link>
   )
@@ -58,6 +60,7 @@ ProductItem.propTypes = {
     bestseller: PropTypes.bool,
     fastSelling: PropTypes.bool,
     lowStock: PropTypes.bool,
+    details: PropTypes.object,
     variants: PropTypes.arrayOf(PropTypes.shape({
       active: PropTypes.bool,
       stockOnHand: PropTypes.number,

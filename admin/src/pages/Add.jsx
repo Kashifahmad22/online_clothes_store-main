@@ -9,6 +9,12 @@ import StockAdjuster from '../components/StockAdjuster'
 import { isArchived, statusLabel } from '../utils/productStatus'
 import { setUnsavedChanges, hasUnsavedChanges, LEAVE_MESSAGE } from '../utils/unsavedChanges'
 import { resolveLoadState } from '../utils/catalogueList'
+import {
+  ATTRIBUTE_FIELDS, MAX_ATTRIBUTE_LENGTH, attributeError, cleanAttributes, legacyAttributeNote
+} from '../utils/productAttributes'
+import {
+  MAX_ALT_TEXT_LENGTH, altTextError, imageProblems, imagesUnchanged, moveItem, primaryMessage, setRole
+} from '../utils/productImages'
 
 // Saved SKUs are tracked by id; stock figures change only through the stock endpoint, so they are not "edits".
 const formSnapshot = (product, collectionTags) => JSON.stringify({
@@ -85,6 +91,65 @@ const allowedImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const maxImageSize = 8 * 1024 * 1024
 const maxImageCount = 12
 
+const IMAGE_ROLES = [
+  ['primary', 'Primary'], ['full-saree', 'Full saree'], ['border', 'Border'], ['pallu', 'Pallu'],
+  ['blouse', 'Blouse'], ['detail', 'Detail'], ['lifestyle', 'Lifestyle'], ['other', 'Other']
+]
+
+const ImageRow = ({ kind, position, src, image, index, total, onRole, onAlt, onMove, onRemove }) => {
+  const error = altTextError(position, image.altText)
+  const isPrimary = image.role === 'primary'
+  return (
+    <div className='flex w-full min-w-0 flex-col gap-3 border p-3 sm:flex-row' data-testid='image-row'>
+      <img className='h-32 w-24 shrink-0 bg-gray-100 object-cover' src={src} alt={image.altText || ''} />
+      <div className='grid min-w-0 flex-1 gap-2'>
+        <div className='flex flex-wrap items-center gap-2'>
+          <strong className='text-sm'>Image {position}{kind === 'upload' ? ' (new)' : ''}</strong>
+          {isPrimary && <span className='border border-amber-600 bg-amber-50 px-2 py-0.5 text-xs text-amber-900'>Primary image</span>}
+        </div>
+        <label className='grid min-w-0 gap-1 text-sm'>Alt text (optional)
+          <input value={image.altText || ''} maxLength={MAX_ALT_TEXT_LENGTH + 40}
+            onChange={event => onAlt(index, event.target.value)} aria-invalid={Boolean(error)}
+            placeholder='Describe what the image shows' className='w-full min-w-0 px-3 py-2' />
+        </label>
+        {error && <p role='alert' className='text-sm text-red-700'>{error}</p>}
+        <div className='flex flex-wrap items-end gap-2'>
+          <label className='grid gap-1 text-sm'>Image type
+            <select value={image.role || 'other'} onChange={event => onRole(kind, index, event.target.value)}
+              className='px-3 py-2'>
+              {IMAGE_ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          {!isPrimary && (
+            <button type='button' onClick={() => onRole(kind, index, 'primary')} className='border px-3 py-2'>
+              Make primary
+            </button>
+          )}
+          <button type='button' disabled={index === 0} onClick={() => onMove(index, index - 1)}
+            aria-label={`Move up (image ${position})`} className='border px-3 py-2 disabled:opacity-40'>Move up</button>
+          <button type='button' disabled={index === total - 1} onClick={() => onMove(index, index + 1)}
+            aria-label={`Move down (image ${position})`} className='border px-3 py-2 disabled:opacity-40'>Move down</button>
+          <button type='button' onClick={() => onRemove(index)} aria-label={`Remove (image ${position})`}
+            className='border px-3 py-2'>Remove</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+ImageRow.propTypes = {
+  kind: PropTypes.oneOf(['saved', 'upload']).isRequired,
+  position: PropTypes.number.isRequired,
+  src: PropTypes.string.isRequired,
+  image: PropTypes.shape({ role: PropTypes.string, altText: PropTypes.string }).isRequired,
+  index: PropTypes.number.isRequired,
+  total: PropTypes.number.isRequired,
+  onRole: PropTypes.func.isRequired,
+  onAlt: PropTypes.func.isRequired,
+  onMove: PropTypes.func.isRequired,
+  onRemove: PropTypes.func.isRequired
+}
+
 const Add = ({ token }) => {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -92,6 +157,9 @@ const Add = ({ token }) => {
   const [product, setProduct] = useState(blankProduct)
   const [collectionTags, setCollectionTags] = useState('')
   const [uploads, setUploads] = useState([])
+  // Details and images exactly as stored, used so untouched legacy values are kept and not re-validated.
+  const [savedDetails, setSavedDetails] = useState()
+  const [savedImages, setSavedImages] = useState()
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
   const [restoring, setRestoring] = useState(false)
@@ -146,6 +214,8 @@ const Add = ({ token }) => {
       setProduct(blankProduct())
       setCollectionTags('')
       setUploads([])
+      setSavedDetails(undefined)
+      setSavedImages(undefined)
       setBaseline(formSnapshot(blankProduct(), ''))
       setLoadInfo({ key: '', state: 'ready', message: '' })
       return undefined
@@ -156,6 +226,8 @@ const Add = ({ token }) => {
     setProduct(blankProduct())
     setCollectionTags('')
     setUploads([])
+    setSavedDetails(undefined)
+    setSavedImages(undefined)
     setBaseline(formSnapshot(blankProduct(), ''))
     const controller = new AbortController()
     axios.get(`${backendUrl}/api/product/admin/${encodeURIComponent(editId)}`, {
@@ -183,6 +255,8 @@ const Add = ({ token }) => {
         }
         const tags = (found.collections || []).join(', ')
         setProduct(loaded)
+        setSavedDetails(found.details || {})
+        setSavedImages(found.images || [])
         setCollectionTags(tags)
         setBaseline(formSnapshot(loaded, tags))
         setLoadInfo({ key: editId, state: 'ready', message: '' })
@@ -230,7 +304,8 @@ const Add = ({ token }) => {
       ...current,
       ...selected.map((file, index) => ({
         file,
-        role: !hasPrimaryImage && current.length === 0 && index === 0 ? 'primary' : 'other'
+        role: !hasPrimaryImage && current.length === 0 && index === 0 ? 'primary' : 'other',
+        altText: ''
       }))
     ])
   }
@@ -337,6 +412,17 @@ const Add = ({ token }) => {
       return
     }
 
+    const attributeCheck = cleanAttributes(product.details, savedDetails)
+    if (attributeCheck.errors.length > 0) {
+      toast.error(attributeCheck.errors[0])
+      return
+    }
+    const problems = imageProblems(product.images, uploads, savedImages)
+    if (problems.length > 0) {
+      toast.error(problems[0])
+      return
+    }
+
     const formData = new FormData()
     const payload = {
       ...product,
@@ -344,7 +430,7 @@ const Add = ({ token }) => {
       pricePaise,
       mrpPaise,
       details: {
-        ...product.details,
+        ...attributeCheck.details,
         specifications: (product.details.specifications || []).filter(specification =>
           specification.label?.trim() && specification.value?.trim())
       },
@@ -362,6 +448,7 @@ const Add = ({ token }) => {
     payload.variants.forEach(variant => delete variant.priceOverride)
     formData.append('product', JSON.stringify(payload))
     formData.append('imageRoles', JSON.stringify(uploads.map(item => item.role)))
+    formData.append('imageAlts', JSON.stringify(uploads.map(item => item.altText || '')))
     uploads.forEach(item => formData.append('images', item.file))
 
     savingRef.current = true
@@ -436,11 +523,20 @@ const Add = ({ token }) => {
     setVariant(index, 'active', false)
   }
 
-  const setExistingImageRole = (index, role) => setProduct(current => ({
+  const applyImageChange = ({ saved, uploads: nextUploads }) => {
+    setProduct(current => ({ ...current, images: saved }))
+    setUploads(nextUploads)
+  }
+  const changeRole = (kind, index, role) =>
+    applyImageChange(setRole(product.images, uploads, kind, index, role))
+  const setSavedAlt = (index, altText) => setProduct(current => ({
     ...current,
-    images: current.images.map((image, imageIndex) =>
-      imageIndex === index ? { ...image, role } : image)
+    images: current.images.map((image, imageIndex) => (imageIndex === index ? { ...image, altText } : image))
   }))
+  const setUploadAlt = (index, altText) => setUploads(current =>
+    current.map((upload, i) => (i === index ? { ...upload, altText } : upload)))
+  const moveSaved = (from, to) => setProduct(current => ({ ...current, images: moveItem(current.images, from, to) }))
+  const moveUpload = (from, to) => setUploads(current => moveItem(current, from, to))
 
   const removeExistingImage = index => setProduct(current => ({
     ...current,
@@ -528,12 +624,34 @@ const Add = ({ token }) => {
         </div>
       </section>
 
+      <section className='w-full grid gap-3'>
+        <h2 className='font-medium'>Fabric and colour</h2>
+        <p className='text-sm text-gray-600'>
+          Optional. Shown on product cards when filled in. Enter only what is true for this product; leave blank if
+          unknown. Placeholders such as N/A or None are not accepted.
+        </p>
+        <div className='grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-[800px]'>
+          {ATTRIBUTE_FIELDS.map(({ key, label, placeholder }) => {
+            const error = attributeError(label, product.details[key], savedDetails?.[key])
+            const note = legacyAttributeNote(label, product.details[key], savedDetails?.[key])
+            return (
+              <label key={key} className='grid min-w-0 gap-1'>{label} (optional)
+                <input value={product.details[key] || ''} maxLength={MAX_ATTRIBUTE_LENGTH + 20}
+                  onChange={event => setDetail(key, event.target.value)} placeholder={placeholder}
+                  aria-invalid={Boolean(error)} className='w-full min-w-0 px-3 py-2' />
+                {error && <span role='alert' className='text-sm text-red-700'>{error}</span>}
+                {note && <span role='status' className='text-sm text-amber-800'>{note}</span>}
+              </label>
+            )
+          })}
+        </div>
+      </section>
+
       {product.productType === 'saree' && (
-        <section className='w-full grid gap-3'>
+        <section className='w-full grid grid-cols-1 gap-3'>
           <h2 className='font-medium'>Saree details</h2>
-          <div className='grid sm:grid-cols-2 gap-3 max-w-[800px]'>
+          <div className='grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-[800px]'>
             {[
-              ['fabric', 'Fabric'],
               ['composition', 'Composition (only if known)'],
               ['variety', 'Silk / cotton variety (if known)'],
               ['weavingTechnique', 'Weaving technique (if verified)'],
@@ -545,7 +663,6 @@ const Add = ({ token }) => {
               ['fabricFeel', 'Fabric feel (if known)'],
               ['seasonalSuitability', 'Seasonal suitability (if known)'],
               ['origin', 'Origin / place of manufacture (if verified)'],
-              ['colour', 'Colour'],
               ['pattern', 'Pattern'],
               ['border', 'Border details'],
               ['pallu', 'Pallu details'],
@@ -558,25 +675,25 @@ const Add = ({ token }) => {
               ['careInstructions', 'Care instructions'],
               ['whatsIncluded', 'Exactly what is included']
             ].map(([field, label]) => (
-              <label key={field} className='grid gap-1'>{label}
+              <label key={field} className='grid min-w-0 gap-1'>{label}
                 <input value={product.details[field] || ''} onChange={event => setDetail(field, event.target.value)}
-                  className='px-3 py-2' />
+                  className='w-full min-w-0 px-3 py-2' />
               </label>
             ))}
           </div>
-          <label className='grid gap-1 w-fit'>Blouse piece inclusion
+          <label className='grid grid-cols-1 gap-1 w-full sm:w-fit'>Blouse piece inclusion
             <select value={product.details.blousePieceIncluded === true ? 'yes'
               : product.details.blousePieceIncluded === false ? 'no' : ''}
               onChange={event => setDetail('blousePieceIncluded',
                 event.target.value === '' ? null : event.target.value === 'yes')}
-              className='px-3 py-2'>
+              className='px-3 py-2 w-full min-w-0'>
               <option value=''>Select actual product information</option>
               <option value='yes'>Included</option>
               <option value='no'>Not included</option>
             </select>
           </label>
           {product.details.blousePieceIncluded && (
-            <div className='grid sm:grid-cols-2 gap-3 max-w-[800px]'>
+            <div className='grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-[800px]'>
               {[
                 ['blousePieceType', 'Attached or separate'],
                 ['blouseFabric', 'Blouse fabric'],
@@ -585,9 +702,9 @@ const Add = ({ token }) => {
                 ['blousePattern', 'Blouse pattern'],
                 ['blouseStitching', 'Stitched / unstitched']
               ].map(([field, label]) => (
-                <label key={field} className='grid gap-1'>{label}
+                <label key={field} className='grid min-w-0 gap-1'>{label}
                   <input value={product.details[field] || ''} onChange={event => setDetail(field, event.target.value)}
-                    className='px-3 py-2' />
+                    className='w-full min-w-0 px-3 py-2' />
                 </label>
               ))}
             </div>
@@ -686,44 +803,33 @@ const Add = ({ token }) => {
 
       <section className='w-full grid gap-3'>
         <h2 className='font-medium'>Product images</h2>
-        <p className='text-sm text-gray-500'>JPG, PNG, or WebP; up to 12 images, 8 MB each.</p>
+        <p className='text-sm text-gray-500'>
+          JPG, PNG, or WebP; up to 12 images, 8 MB each. Exactly one image is the primary image shown on cards and
+          first in the gallery. New uploads are added after saved images. Alt text describes the image for screen
+          readers and search engines; leave it blank to use the product name.
+        </p>
+        {primaryMessage(product.images, uploads) && (
+          imagesUnchanged(product.images, uploads, savedImages)
+            ? <p role='status' className='text-sm text-amber-800 border border-amber-300 bg-amber-50 p-2'>
+              {primaryMessage(product.images, uploads)} Saving other changes still works; choosing a primary is only
+              required when you change the images.
+            </p>
+            : <p role='alert' className='text-sm text-red-700 border border-red-300 bg-red-50 p-2'>
+              {primaryMessage(product.images, uploads)}
+            </p>
+        )}
         {product.images.map((image, index) => (
-          <div key={image.url} className='flex gap-3 items-center'>
-            <img className='w-16 h-20 object-cover' src={image.url} alt={image.altText || ''} />
-            <select value={image.role || 'other'} onChange={event => setExistingImageRole(index, event.target.value)}
-              className='px-3 py-2'>
-              <option value='primary'>Primary</option>
-              <option value='full-saree'>Full saree</option>
-              <option value='border'>Border</option>
-              <option value='pallu'>Pallu</option>
-              <option value='blouse'>Blouse</option>
-              <option value='detail'>Detail</option>
-              <option value='lifestyle'>Lifestyle</option>
-              <option value='other'>Other</option>
-            </select>
-            <button type='button' onClick={() => removeExistingImage(index)} className='border px-3 py-2'>Remove</button>
-          </div>
+          <ImageRow key={image.url} kind='saved' position={index + 1} src={image.url} image={image}
+            index={index} total={product.images.length} onRole={changeRole} onAlt={setSavedAlt} onMove={moveSaved}
+            onRemove={removeExistingImage} />
         ))}
         {previews.map((item, index) => (
-          <div key={`${item.file.name}-${index}`} className='flex gap-3 items-center'>
-            <img className='w-16 h-20 object-cover' src={item.url} alt='' />
-            <select value={item.role} onChange={event => setUploads(current =>
-              current.map((upload, i) => i === index ? { ...upload, role: event.target.value } : upload))}
-              className='px-3 py-2'>
-              <option value='primary'>Primary</option>
-              <option value='full-saree'>Full saree</option>
-              <option value='border'>Border</option>
-              <option value='pallu'>Pallu</option>
-              <option value='blouse'>Blouse</option>
-              <option value='detail'>Detail</option>
-              <option value='lifestyle'>Lifestyle</option>
-              <option value='other'>Other</option>
-            </select>
-            <button type='button' onClick={() => setUploads(current => current.filter((_, i) => i !== index))}
-              className='border px-3 py-2'>Remove</button>
-          </div>
+          <ImageRow key={`${item.file.name}-${index}`} kind='upload' position={product.images.length + index + 1}
+            src={item.url} image={item} index={index} total={previews.length} onRole={changeRole}
+            onAlt={setUploadAlt} onMove={moveUpload}
+            onRemove={i => setUploads(current => current.filter((_, j) => j !== i))} />
         ))}
-        <input type='file' accept='image/jpeg,image/png,image/webp' multiple onChange={addUploads} />
+        <input type='file' accept='image/jpeg,image/png,image/webp' multiple onChange={addUploads} className='w-full min-w-0 max-w-full' />
       </section>
 
       <section className='w-full grid gap-2'>

@@ -4,7 +4,12 @@ import { v2 as cloudinary } from "cloudinary";
 import productModel from "../models/productModel.js";
 import productVariantModel from "../models/productVariantModel.js";
 import {
+    assembleImages,
+    imagesUnchanged,
     isValidObjectId,
+    keepStoredImages,
+    normaliseDetailAttributes,
+    parseImageAlts,
     parseImageRoles,
     parseProductPayload,
     toPublicProduct,
@@ -46,8 +51,11 @@ const respondError = (res, error) => {
     return res.status(500).json({ success: false, message: "Unable to complete the product request." });
 };
 
-const uploadImages = async (files, rawRoles) => {
+const uploadImages = async (files, rawRoles, rawAlts, retained = []) => {
     const roles = parseImageRoles(rawRoles, files.length);
+    const alts = parseImageAlts(rawAlts, files.length);
+    // Reject a bad primary/alt combination before anything is sent to Cloudinary.
+    assembleImages([...retained, ...files.map((_, index) => ({ url: "pending", role: roles[index], altText: alts[index] }))]);
     return Promise.all(files.map(async (file, index) => {
         const result = await cloudinary.uploader.upload(file.path, {
             resource_type: "image",
@@ -56,7 +64,7 @@ const uploadImages = async (files, rawRoles) => {
         return {
             url: result.secure_url,
             role: roles[index],
-            altText: "",
+            altText: alts[index],
             order: index
         };
     }));
@@ -121,14 +129,8 @@ const addProduct = async (req, res) => {
         if (payload.status === "archived") {
             return res.status(400).json({ success: false, message: "A new product cannot be created as archived." });
         }
-        const uploadedImages = await uploadImages(files, req.body.imageRoles);
-        const images = [...(payload.images || []), ...uploadedImages]
-            .map((image, index) => ({
-                url: image.url,
-                role: image.role,
-                altText: image.altText || "",
-                order: index
-            }));
+        const uploadedImages = await uploadImages(files, req.body.imageRoles, req.body.imageAlts, payload.images || []);
+        const images = assembleImages([...(payload.images || []), ...uploadedImages]);
         if (images.length > 12) {
             return res.status(400).json({ success: false, message: "A product can have up to 12 images." });
         }
@@ -177,18 +179,19 @@ const updateProduct = async (req, res) => {
         if (!isValidObjectId(req.params.productId)) {
             return res.status(400).json({ success: false, message: "Invalid product ID." });
         }
-        const payload = parseProductPayload(req.body.product);
-        const uploadedImages = await uploadImages(files, req.body.imageRoles);
+        const payload = parseProductPayload(req.body.product, { deferAttributes: true });
         const product = await productModel.findById(req.params.productId);
         if (!product) return res.status(404).json({ success: false, message: "Product not found." });
+        normaliseDetailAttributes(payload.details, product.details);
 
         const retainedImages = Array.isArray(payload.images) ? payload.images : product.images;
-        const images = [...retainedImages, ...uploadedImages].map((image, index) => ({
-            url: image.url,
-            role: image.role || "other",
-            altText: image.altText || "",
-            order: index
-        }));
+        const keepStored = imagesUnchanged(retainedImages, product.images, files.length);
+        const uploadedImages = keepStored
+            ? []
+            : await uploadImages(files, req.body.imageRoles, req.body.imageAlts, retainedImages);
+        const images = keepStored
+            ? keepStoredImages(product.images)
+            : assembleImages([...retainedImages, ...uploadedImages]);
         if (images.length > 12) {
             return res.status(400).json({ success: false, message: "A product can have up to 12 images." });
         }

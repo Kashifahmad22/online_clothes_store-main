@@ -4,9 +4,46 @@ import { ShopContext } from '../context/ShopContext'
 import axios from 'axios'
 import { toast } from 'react-toastify'
 import { openRazorpayCheckout } from '../utils/razorpayCheckout'
+import OrderDetails from '../components/OrderDetails'
+import { formatInr, formatOrderDate, formatOrderReference, fulfilmentLabel } from '../utils/orderDisplay'
+
+// Mirrors the backend payable gate; the server remains authoritative and rejects ineligible retries.
+const canRetryPayment = order => {
+  if (order.paymentMethod !== 'Razorpay' || order.fulfillmentHold || order.paymentIssue) return false
+  if (order.status !== 'Order Placed') return false
+  if (order.paymentStatus === 'failed') return true
+  return order.paymentStatus === 'pending' && Boolean(order.reservationHeld) &&
+    new Date(order.reservationExpiresAt) > new Date()
+}
+
+const paymentNotice = order => {
+  if (order.paymentMethod !== 'Razorpay') return ''
+  if (order.paymentStatus === 'refunded') return 'This payment has been refunded.'
+  if (order.paymentIssue === 'stock') {
+    return 'We received your payment, but the item is currently unavailable. Our team is reviewing the order and will contact you. You do not need to pay again.'
+  }
+  if (order.paymentIssue === 'cancelled_capture') {
+    return 'Your payment arrived after this order was cancelled. Our team is reviewing it; a refund has not yet been confirmed. You do not need to pay again.'
+  }
+  if (order.paymentIssue === 'duplicate') {
+    return 'We detected more than one payment for this order. Our team is reviewing it and will contact you. Please do not pay again.'
+  }
+  if (order.paymentIssue === 'review') {
+    return 'We have received your payment and our team is reviewing this order. You do not need to pay again.'
+  }
+  if (order.status === 'Cancelled' && order.paymentStatus === 'paid') {
+    return 'This order was cancelled. Your payment is being reviewed by our team; a refund has not yet been confirmed.'
+  }
+  if (order.fulfillmentHold) {
+    return 'We have received your payment and our team is reviewing this order. We will contact you with the outcome. You do not need to pay again.'
+  }
+  if (order.status === 'Cancelled') return 'This order was cancelled and can no longer be paid.'
+  if (order.paymentStatus === 'authorized') return 'Your payment is being confirmed. Please check again shortly.'
+  return ''
+}
 
 const Orders = () => {
-  const { backendUrl, token, currency, setCartItems } = useContext(ShopContext)
+  const { backendUrl, token, setCartItems, refreshCart } = useContext(ShopContext)
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -52,7 +89,9 @@ const Orders = () => {
               { headers: { token } }
             )
             if (verification.data.success && verification.data.paymentStatus === 'paid') {
-              setCartItems({})
+              // The server removes only purchased quantities, so reload the cart instead of emptying it.
+              if (refreshCart) await refreshCart()
+              else setCartItems({})
               toast.success(verification.data.message || 'Payment confirmed.')
             } else {
               toast.info(verification.data.message || 'Payment is still processing. Refresh your orders shortly.')
@@ -87,48 +126,34 @@ const Orders = () => {
         <h1>Your orders</h1>
       </header>
 
-      {loading && <p className='py-10 text-center text-sm text-stone-600'>Loading your order history…</p>}
-      {!loading && loadError && <p role='alert' className='border border-red-200 bg-red-50 p-4 text-sm text-red-900'>{loadError}</p>}
-      {!loading && !loadError && orders.length === 0 && (
+      {loading && <p role='status' className='py-10 text-center text-sm text-stone-600'>Loading your order history…</p>}
+      {!loading && !token && (
+        <div className='catalogue-empty text-center'>
+          <h2>Sign in to see your orders</h2>
+          <p>Your order history is available once you are signed in.</p>
+          <Link to='/login' className='button button--wine mt-5'>Sign in</Link>
+        </div>
+      )}
+      {!loading && token && loadError && (
+        <div role='alert' className='border border-red-200 bg-red-50 p-4 text-sm text-red-900'>
+          <p>{loadError}</p>
+          <button type='button' onClick={loadOrderData} className='button button--wine mt-3'>Try again</button>
+        </div>
+      )}
+      {!loading && token && !loadError && orders.length === 0 && (
         <div className='catalogue-empty text-center'>
           <h2>No orders to show</h2>
           <p>Orders placed with this account will appear here.</p>
           <Link to='/collection' className='button button--wine mt-5'>Browse the collection</Link>
         </div>
       )}
-      {!loading && !loadError && orders.map(order => (
-        <section key={order._id} className='mb-8 border-t border-stone-200 pt-5'>
-          <div className='mb-4 flex flex-wrap items-start justify-between gap-3'>
-            <div>
-              <p className='text-sm font-semibold'>Order {order._id}</p>
-              <p className='mt-1 text-sm text-stone-600'>
-                Placed: {Number.isFinite(Number(order.date))
-                  ? new Date(Number(order.date)).toLocaleDateString('en-IN')
-                  : 'Date unavailable'}
-              </p>
-            </div>
-            <div className='text-sm'>
-              <p>{order.paymentMethod === 'COD' ? 'Cash on delivery' : order.paymentMethod || 'Payment method unavailable'}</p>
-              <p className='mt-1 text-stone-600'>Payment: {order.paymentStatus || (order.payment ? 'paid' : 'pending')}</p>
-              {order.fulfillmentHold && <p className='mt-1 font-medium text-amber-800'>Payment received; order review is in progress.</p>}
-            </div>
+      {!loading && token && !loadError && orders.map(order => (
+        <section key={order._id} className='mb-8 border-t border-stone-200 pt-5' aria-label={`Order ${formatOrderReference(order)}`}>
+          <div className='mb-4'>
+            <h2 className='text-base font-semibold'>Order {formatOrderReference(order) || 'reference unavailable'}</h2>
+            {formatOrderDate(order) && <p className='mt-1 text-sm text-stone-600'>Placed on {formatOrderDate(order)}</p>}
           </div>
-          {(order.items || []).map((item, index) => (
-            <article key={`${item.variantId || item.sku || item.name}-${index}`} className='order-line'>
-              {item.image?.[0]
-                ? <img src={item.image[0]} alt={item.name || 'Ordered product'} />
-                : <div className='order-line__image-placeholder' aria-label='Product image unavailable' />}
-              <div className='order-line__details'>
-                <h2>{item.name}</h2>
-                <p>{currency}{item.price} <span>·</span> Quantity: {item.quantity}</p>
-                <p>SKU: {item.sku || 'Not recorded'}</p>
-              </div>
-              <div className='order-line__status'>
-                <span className='order-status-mark' aria-hidden='true' />
-                <span>{order.status || 'Status unavailable'}</span>
-              </div>
-            </article>
-          ))}
+          <OrderDetails order={order} fulfilment={fulfilmentLabel(order)} />
           {order.shipping?.courierName && (
             <div className='mt-3 border-l-2 border-amber-700 pl-4 text-sm text-stone-700'>
               <p className='font-medium'>Shipping updates</p>
@@ -147,8 +172,18 @@ const Orders = () => {
           )}
           {order.refundedPaise > 0 && (
             <p className='mt-3 text-sm text-stone-700'>
-              Refunded: {currency}{(order.refundedPaise / 100).toFixed(2)}
+              Refunded: {formatInr(order.refundedPaise)}
               {order.paymentStatus === 'refunded' ? ' (fully refunded)' : ' (partial refund)'}
+            </p>
+          )}
+          {order.refundStatus === 'pending' && (
+            <p className='mt-3 text-sm text-stone-700'>
+              A refund for this order is being processed. We will update this page once it is confirmed.
+            </p>
+          )}
+          {order.refundStatus === 'failed' && (
+            <p className='mt-3 text-sm text-stone-700'>
+              A refund for this order could not be completed. Our team will follow up with you.
             </p>
           )}
           {Array.isArray(order.timeline) && order.timeline.some(entry => entry.kind === 'fulfilment') && (
@@ -164,9 +199,10 @@ const Orders = () => {
               </ol>
             </details>
           )}
-          {order.paymentMethod === 'Razorpay' && ['pending', 'failed'].includes(order.paymentStatus) &&
-            ((order.reservationHeld && new Date(order.reservationExpiresAt) > new Date()) ||
-              order.paymentStatus === 'failed') && (
+          {paymentNotice(order) && (
+            <p className='mt-3 border-l-2 border-amber-700 pl-4 text-sm text-stone-700'>{paymentNotice(order)}</p>
+          )}
+          {canRetryPayment(order) && (
               <button type='button' disabled={Boolean(retryingOrderId)}
                 onClick={() => retryPayment(order)} className='button button--wine mt-4 disabled:opacity-50'>
                 {retryingOrderId === order._id ? 'Opening secure payment…' : 'Retry online payment'}

@@ -5,17 +5,17 @@ import { campaigns } from '../config/campaigns'
 import { getWhatsAppSupportUrl } from '../config/support'
 import { useContext } from 'react'
 import { ShopContext } from '../context/ShopContext'
-import { storefrontNavigation } from '../config/productCategories'
+import { catalogueState, storefrontNavigation } from '../config/productCategories'
 import AnnouncementBar from './AnnouncementBar'
 
 const Navbar = () => {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuButtonRef = useRef(null)
   const menuPanelRef = useRef(null)
-  const { setShowSearch, getCartCount, navigate, token, setToken, setCartItems, products, siteSettings, siteSettingsLoaded, siteSettingsError } = useContext(ShopContext)
+  const { setShowSearch, getCartCount, navigate, token, setToken, setCartItems, products, productsLoading, productsError, siteSettings, siteSettingsLoaded, siteSettingsError } = useContext(ShopContext)
   const brand = siteSettings.brand
   const whatsappUrl = getWhatsAppSupportUrl(siteSettings.support.whatsapp)
-  const availableCategories = storefrontNavigation(products)
+  const availableCategories = storefrontNavigation(products, catalogueState({ productsLoading, productsError }))
   const activeCampaigns = campaigns.filter(campaign =>
     products.some(product => (product.collections || []).includes(campaign.collectionTag))
   )

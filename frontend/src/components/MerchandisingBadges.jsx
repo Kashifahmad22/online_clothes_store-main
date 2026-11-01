@@ -1,8 +1,8 @@
 import PropTypes from 'prop-types'
 import { MERCHANDISING_BADGE_LABELS, getMerchandisingBadges } from '../utils/productDisplay'
 
-const MerchandisingBadges = ({ product, className = '' }) => {
-  const badges = getMerchandisingBadges(product)
+const MerchandisingBadges = ({ product, className = '', hideLowStock = false }) => {
+  const badges = getMerchandisingBadges(product).filter(badge => !(hideLowStock && badge === 'low-stock'))
   if (badges.length === 0) return null
   return (
     <ul className={`merch-badges ${className}`.trim()}>
@@ -19,7 +19,8 @@ MerchandisingBadges.propTypes = {
     fastSelling: PropTypes.bool,
     lowStock: PropTypes.bool
   }).isRequired,
-  className: PropTypes.string
+  className: PropTypes.string,
+  hideLowStock: PropTypes.bool
 }
 
 export default MerchandisingBadges

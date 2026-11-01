@@ -29,10 +29,39 @@ const historySchema = new mongoose.Schema({
     note: { type: String, maxlength: 200 }
 }, { _id: false });
 
+// One record per refund. Records written before Phase 9.7 hold only refundId, amountPaise and processedAt and
+// are always treated as processed (see refundStatusOf). Amounts are integer paise.
 const refundSchema = new mongoose.Schema({
-    refundId: { type: String, required: true },
+    internalId: { type: String },
+    refundId: { type: String },
+    paymentId: { type: String },
     amountPaise: { type: Number, min: 1, validate: Number.isSafeInteger },
+    currency: { type: String },
+    status: { type: String, enum: ["requested", "pending", "processed", "failed"] },
+    reason: { type: String, maxlength: 120 },
+    initiatedBy: { type: String, enum: ["admin", "gateway"] },
+    idempotencyKey: { type: String },
+    failureReason: { type: String, maxlength: 200 },
+    requestedAt: { type: Date },
+    updatedAt: { type: Date },
     processedAt: { type: Date }
+}, { _id: false });
+
+// A captured payment, other than the order's primary one, whose captured amount was verified with Razorpay at
+// the time an admin refunded it. It gives that payment its own refund balance, separate from the order total.
+const capturedPaymentSchema = new mongoose.Schema({
+    paymentId: { type: String, required: true },
+    razorpayOrderId: { type: String, required: true },
+    amountPaise: { type: Number, min: 1, required: true, validate: Number.isSafeInteger },
+    currency: { type: String, default: "INR" },
+    verifiedAt: { type: Date, default: Date.now }
+}, { _id: false });
+
+const reconciliationSchema = new mongoose.Schema({
+    attempts: { type: Number, default: 0 },
+    lastAttemptAt: { type: Date },
+    lastOutcome: { type: String, maxlength: 40 },
+    lastDetail: { type: String, maxlength: 200 }
 }, { _id: false });
 
 const orderSchema = new mongoose.Schema({
@@ -63,10 +92,17 @@ const orderSchema = new mongoose.Schema({
     reservationHeld: { type: Boolean, default: false },
     fulfillmentHold: { type: Boolean, default: false },
     paymentReviewRequired: { type: Boolean, default: false },
+    paymentReviewReason: {
+        type: String,
+        enum: ["", "stock_unavailable", "inventory_conflict", "order_cancelled", "duplicate_payment", "authorized_on_closed_order", "payment_mismatch"],
+        default: ""
+    },
     duplicatePaymentIds: { type: [String], default: [] },
+    capturedPayments: { type: [capturedPaymentSchema], default: [] },
     paidAt: { type: Date },
     refunds: { type: [refundSchema], default: [] },
     refundedPaise: { type: Number, min: 0, default: 0, validate: Number.isSafeInteger },
+    reconciliation: { type: reconciliationSchema, default: () => ({}) },
     statusHistory: { type: [historySchema], default: [] },
     // Explicit checkout consent to receive order updates on WhatsApp; absent on older orders, which means "no".
     whatsappOptIn: { type: Boolean, default: false, immutable: true },
@@ -76,6 +112,7 @@ const orderSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 orderSchema.index({ userId: 1, createdAt: -1 });
+orderSchema.index({ paymentMethod: 1, paymentStatus: 1, createdAt: -1 });
 orderSchema.index({ razorpayOrderId: 1 }, { unique: true, sparse: true });
 orderSchema.index(
     { userId: 1, idempotencyKey: 1 },

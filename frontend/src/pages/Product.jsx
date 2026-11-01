@@ -6,6 +6,10 @@ import ProductGallery from '../components/ProductGallery'
 import ProductPrice from '../components/ProductPrice'
 import RelatedProducts from '../components/RelatedProducts'
 import MerchandisingBadges from '../components/MerchandisingBadges'
+import ProductTrustInfo from '../components/ProductTrustInfo'
+import QuantitySelector from '../components/QuantitySelector'
+import DeliveryChecker from '../components/DeliveryChecker'
+import { resolveProductCategory } from '../config/canonicalCategories'
 import { isVariantAvailable, remainingQuantity, validatePurchaseQuantity } from '../utils/productDisplay'
 import { applyPageMeta, buildProductJsonLd, buildProductMeta, normaliseSiteUrl, setJsonLd } from '../utils/seo'
 
@@ -44,7 +48,7 @@ const detailLabels = {
 
 const Product = () => {
   const { productId } = useParams()
-  const { getProductById, updateQuantity, cartItems, navigate, siteSettings } = useContext(ShopContext)
+  const { backendUrl, getProductById, updateQuantity, cartItems, navigate, siteSettings, siteSettingsLoaded, siteSettingsError } = useContext(ShopContext)
   const [quantity, setQuantity] = useState('1')
   const [product, setProduct] = useState(null)
   const [variantId, setVariantId] = useState('')
@@ -135,6 +139,8 @@ const Product = () => {
     )
   }
 
+  const parentCategory = resolveProductCategory(product).category
+
   const addSelectedToCart = async () => {
     if (addingToCart) return false
     if (!selectedVariant || !isVariantAvailable(selectedVariant)) {
@@ -170,8 +176,16 @@ const Product = () => {
         <ProductGallery key={product._id} images={productImages} productName={product.name} />
 
         <section className='product-info pb-20 md:pb-0'>
-          <Link to='/' className='product-breadcrumb'>Home <span aria-hidden='true'>/</span> </Link>
-          <Link to='/collection' className='product-breadcrumb'>Shop <span aria-hidden='true'>/</span> {product.category}</Link>
+          <nav aria-label='Breadcrumb' className='product-breadcrumbs'>
+            <ol>
+              <li><Link to='/' className='product-breadcrumb'>Home</Link></li>
+              <li><Link to='/collection' className='product-breadcrumb'>Shop</Link></li>
+              {parentCategory
+                ? <li><Link to={`/category/${parentCategory.slug}`} className='product-breadcrumb'>{parentCategory.label}</Link></li>
+                : product.category && <li><span className='product-breadcrumb'>{product.category}</span></li>}
+              <li><span aria-current='page' className='product-breadcrumbs__current'>{product.name}</span></li>
+            </ol>
+          </nav>
           <p className='product-kicker'>
             {product.productType === 'saree' ? 'Saree' : product.category}
           </p>
@@ -182,7 +196,12 @@ const Product = () => {
             <ProductPrice price={price} mrp={mrp} />
           </div>
 
-          {product.description && <p className='product-description whitespace-pre-line'>{product.description}</p>}
+          {product.description && (
+            <details className='product-specifications mt-4' open>
+              <summary>Description <span aria-hidden='true'>＋</span></summary>
+              <p className='product-description mt-3 whitespace-pre-line'>{product.description}</p>
+            </details>
+          )}
 
           {product.variants?.length > 0 && (
             <fieldset className='variant-options mt-6'>
@@ -211,28 +230,21 @@ const Product = () => {
           )}
 
           <p className={`product-availability mt-4 text-sm font-medium ${isAvailable ? 'product-availability--available' : 'text-stone-600'}`}>
-            {isAvailable ? 'In stock' : 'Currently out of stock'}
+            {!isAvailable ? 'Currently out of stock' : product.lowStock === true ? 'Low stock' : 'In stock'}
           </p>
 
           {isAvailable && (
             <div className='mt-4'>
-              <label className='flex items-center gap-3 text-sm font-medium text-stone-900'>
-                <span>Quantity</span>
-                <input type='text' inputMode='numeric' pattern='[0-9]*' autoComplete='off'
-                  value={quantity} disabled={remaining < 1}
-                  aria-invalid={!quantityCheck.valid && remaining > 0}
-                  aria-describedby='product-quantity-note'
-                  className='min-h-11 w-20 border border-stone-300 bg-white px-2 text-center disabled:opacity-50'
-                  onChange={event => setQuantity(event.target.value)} />
-              </label>
-              <p id='product-quantity-note' role={!quantityCheck.valid && remaining > 0 ? 'alert' : undefined}
-                className={`mt-1 text-xs ${!quantityCheck.valid && remaining > 0 ? 'text-red-800' : 'text-stone-600'}`}>
-                {!quantityCheck.valid && remaining > 0
-                  ? quantityCheck.error
-                  : inCart > 0 ? `${inCart} already in your cart.` : ''}
-              </p>
+              <QuantitySelector
+                value={quantity}
+                max={remaining}
+                onChange={setQuantity}
+                error={!quantityCheck.valid && remaining > 0 ? quantityCheck.error : ''}
+                note={inCart > 0 ? `${inCart} already in your cart.` : ''} />
             </div>
           )}
+
+          <DeliveryChecker backendUrl={backendUrl} />
 
           <button
             type='button'
@@ -274,6 +286,8 @@ const Product = () => {
               </dl>
             </details>
           )}
+
+          <ProductTrustInfo settings={siteSettings} loaded={Boolean(siteSettingsLoaded)} error={siteSettingsError || ''} />
         </section>
       </div>
 

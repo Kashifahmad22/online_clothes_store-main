@@ -1,13 +1,24 @@
 import mongoose from "mongoose";
 import orderModel from "../models/orderModel.js";
 import userModel from "../models/userModel.js";
+import { removePurchasedFromCart } from "../utils/cartPurchase.js";
 import productVariantModel from "../models/productVariantModel.js";
 import storefrontSettingsModel from "../models/storefrontSettingsModel.js";
 import razorpayWebhookEventModel from "../models/razorpayWebhookEventModel.js";
 import { buildOrderItems } from "./orderController.js";
 import { dispatchNotifications, stageNotification } from "../utils/notifications/index.js";
 import { historyEntry, recordPaymentStatus } from "../utils/orderFulfillment.js";
-import { applyProcessedRefund } from "../utils/orderPayments.js";
+import { applyRefund } from "../utils/refunds.js";
+import { recordAnomalies } from "../utils/paymentAnomalies.js";
+import { deductAvailableStock } from "../utils/orderStock.js";
+import {
+    REVIEW_REASONS,
+    REVIEW_REASON_LABELS,
+    applyPaymentAttempt,
+    flagReview,
+    getPaymentBlock,
+    transitionPayment
+} from "../utils/paymentStateMachine.js";
 import {
     calculateShippingPaise,
     calculateSubtotalPaise,
@@ -15,10 +26,8 @@ import {
     validateDeliveryAddress,
     whatsappConsentFields
 } from "../utils/orderValidation.js";
-import {
-    createRazorpayClient,
-    getRazorpayTestConfig
-} from "../utils/razorpayConfig.js";
+import { getRazorpayTestConfig } from "../utils/razorpayConfig.js";
+import { razorpayGateway } from "../utils/razorpayGateway.js";
 import {
     isValidIdempotencyKey,
     validateCapturedPayment,
@@ -29,10 +38,10 @@ import {
 
 const RESERVATION_DURATION_MS = 15 * 60 * 1000;
 
-// Single seam for the Razorpay SDK client so tests can substitute it and never reach the real API.
-export const razorpayGateway = { client: () => createRazorpayClient() };
+export { razorpayGateway };
 
-const apiError = (message, status = 400) => Object.assign(new Error(message), { status });
+const apiError = (message, status = 400, code) => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
+const errorBody = error => ({ success: false, message: error.message, ...(error.code ? { code: error.code } : {}) });
 const getPaymentAddress = address => ({
     name: `${address.firstName} ${address.lastName}`.trim(),
     email: address.email,
@@ -78,21 +87,26 @@ const settleCapturedPayment = async (order, payment, session) => {
         throw apiError("Captured payment does not match the order amount and currency.", 400);
     }
 
-    if (order.paymentStatus === "paid") {
+    if (order.paymentStatus === "paid" || order.paymentStatus === "refunded") {
         if (payment.id && !order.razorpayPaymentId) {
             order.razorpayPaymentId = payment.id;
             await order.save({ session });
-        } else if (payment.id && payment.id !== order.razorpayPaymentId) {
+        } else if (payment.id && payment.id !== order.razorpayPaymentId &&
+            !order.duplicatePaymentIds.includes(payment.id)) {
+            // A second distinct capture is evidence for review. Stock was already settled for the first one.
             order.duplicatePaymentIds.addToSet(payment.id);
-            order.paymentReviewRequired = true;
-            order.fulfillmentHold = true;
+            flagReview(order, order.paymentReviewReason || REVIEW_REASONS.DUPLICATE_PAYMENT, {
+                note: "A second payment was captured for this order; it needs manual review."
+            });
             await order.save({ session });
         }
         return;
     }
 
-    let fulfillmentHold = !order.reservationHeld;
-    if (order.reservationHeld) {
+    const cancelled = order.status === "Cancelled";
+    let reviewReason = "";
+    let note = "";
+    if (order.reservationHeld && !cancelled) {
         const reservationsValid = await Promise.all(order.items.map(item =>
             productVariantModel.exists({
                 _id: item.variantId,
@@ -119,24 +133,37 @@ const settleCapturedPayment = async (order, payment, session) => {
             order.reservationHeld = false;
         } else {
             await releaseReservation(order, session);
-            fulfillmentHold = true;
+            reviewReason = REVIEW_REASONS.INVENTORY_CONFLICT;
+        }
+    } else {
+        await releaseReservation(order, session);
+        if (cancelled) {
+            reviewReason = REVIEW_REASONS.ORDER_CANCELLED;
+        } else if (await deductAvailableStock(order.items, session)) {
+            note = "Payment captured after the reservation lapsed; stock was re-acquired.";
+        } else {
+            reviewReason = REVIEW_REASONS.STOCK_UNAVAILABLE;
         }
     }
 
     order.payment = true;
-    recordPaymentStatus(order, "paid");
+    transitionPayment(order, "paid", note ? { note } : {});
     order.razorpayPaymentId = payment.id || order.razorpayPaymentId;
-    order.fulfillmentHold = fulfillmentHold;
     order.paidAt = new Date();
+    if (reviewReason) {
+        flagReview(order, reviewReason, {
+            note: `Payment captured but the order is on review hold: ${REVIEW_REASON_LABELS[reviewReason]}.`
+        });
+    } else {
+        order.fulfillmentHold = false;
+        order.paymentReviewRequired = false;
+        order.paymentReviewReason = "";
+    }
     await order.save({ session });
-    await userModel.updateOne(
-        { _id: order.userId },
-        { $set: { cartData: {} } },
-        { session }
-    );
+    if (!cancelled) await removePurchasedFromCart(order.userId, order.items, session);
 };
 
-const processCapturedPayment = async payment => {
+export const processCapturedPayment = async payment => {
     const session = await mongoose.startSession();
     try {
         await session.withTransaction(async () => {
@@ -152,14 +179,12 @@ const processCapturedPayment = async payment => {
     dispatchNotifications();
 };
 
-const processRefundProcessed = async (order, refund, session) => {
-    const result = applyProcessedRefund(order, refund);
-    if (result.error) throw apiError(result.error, 400);
-    if (result.applied) await order.save({ session });
-    return result;
-};
+// Event names follow Razorpay's documented webhook catalogue; they still need confirming against real test-mode deliveries.
+const REFUND_EVENT_STATUS = { "refund.created": "pending", "refund.processed": "processed", "refund.failed": "failed" };
+const REFUND_EVENTS = new Set(Object.keys(REFUND_EVENT_STATUS));
 
 const processWebhookEvent = async (eventId, event, payload) => {
+    const anomalies = [];
     const session = await mongoose.startSession();
     try {
         await session.withTransaction(async () => {
@@ -196,21 +221,43 @@ const processWebhookEvent = async (eventId, event, payload) => {
                 return;
             }
 
-            if (event === "refund.processed") {
+            if (REFUND_EVENTS.has(event)) {
                 const refund = payload.refund?.entity;
                 const payment = payload.payment?.entity;
                 if (!refund || typeof refund.payment_id !== "string") {
                     throw apiError("Webhook refund payload is invalid.", 400);
                 }
+                const anomaly = kind => anomalies.push({
+                    kind, source: "webhook", eventId, event, paymentId: refund.payment_id, refundId: refund.id,
+                    amountPaise: refund.amount, currency: refund.currency,
+                    razorpayOrderId: typeof payment?.order_id === "string" ? payment.order_id : undefined
+                });
                 const order = await orderModel.findOne({
                     $or: [
                         { razorpayPaymentId: refund.payment_id },
+                        { duplicatePaymentIds: refund.payment_id },
                         ...(typeof payment?.order_id === "string" ? [{ razorpayOrderId: payment.order_id }] : [])
                     ]
                 }).session(session);
-                if (!order) return;
-                const result = await processRefundProcessed(order, refund, session);
-                if (result.applied) await stageNotification(order, "refund_processed", { session, suffix: refund.id });
+                if (!order) {
+                    anomaly("refund_unknown_order");
+                    return;
+                }
+                // The signed entity's own status wins; the event name is only a fallback when it is absent.
+                const status = ["pending", "processed", "failed"].includes(refund.status) ? refund.status : REFUND_EVENT_STATUS[event];
+                const result = applyRefund(order, { ...refund, status });
+                if (result.error) {
+                    anomaly("refund_mismatch");
+                    anomalies[anomalies.length - 1].orderId = String(order._id);
+                    anomalies[anomalies.length - 1].detail = result.error;
+                    throw apiError(result.error, 400);
+                }
+                if (result.applied) {
+                    await order.save({ session });
+                    if (result.becameProcessed) {
+                        await stageNotification(order, "refund_processed", { session, suffix: refund.id });
+                    }
+                }
                 return;
             }
 
@@ -224,29 +271,23 @@ const processWebhookEvent = async (eventId, event, payload) => {
                 if (!validateWebhookPayment(payment, order, event)) {
                     throw apiError("Webhook payment does not match the order amount and currency.", 400);
                 }
-                if (event === "payment.authorized" && order.reservationHeld) {
-                    recordPaymentStatus(order, "authorized");
-                } else if (event === "payment.failed" && order.reservationHeld) {
-                    await releaseReservation(order, session);
-                    recordPaymentStatus(order, "failed");
-                }
-                await order.save({ session });
+                // Failures never release stock: the customer may still pay in the same Razorpay modal, and
+                // the expiry sweeper alone releases an unpaid reservation at its original deadline.
+                const outcome = applyPaymentAttempt(order, payment, event === "payment.failed" ? "failed" : "authorized");
+                if (outcome === "recorded" || outcome === "flagged") await order.save({ session });
             }
         });
         dispatchNotifications();
         return "processed";
     } finally {
         await session.endSession();
+        await recordAnomalies(anomalies);
     }
 };
 
-const respondWithPaymentOrder = (res, order, status = 200) => {
-    if (order.razorpaySetupStatus !== "ready" || !order.razorpayOrderId) {
-        return res.status(409).json({
-            success: false,
-            message: "Payment setup is not ready. Retry shortly or start a new checkout."
-        });
-    }
+const respondWithPaymentOrder = (res, order, status = 200, options = {}) => {
+    const block = getPaymentBlock(order, options);
+    if (block) return res.status(block.status).json({ success: false, code: block.code, message: block.message });
     const config = getRazorpayTestConfig();
     return res.status(status).json(makePaymentResponse(order, config.keyId));
 };
@@ -416,35 +457,37 @@ export const retryRazorpayOrder = async (req, res) => {
                     userId: req.auth.userId,
                     paymentMethod: "Razorpay"
                 }).session(session);
-                if (!order) throw apiError("Payment order not found.", 404);
-                const reservationActive = order.reservationHeld &&
-                    order.reservationExpiresAt > new Date();
-                if (order.paymentStatus === "pending" && reservationActive) return;
-                if (order.paymentStatus !== "failed") {
-                    throw apiError("This payment cannot be retried. Refresh your orders.", 409);
-                }
+                if (!order) throw apiError("Payment order not found.", 404, "ORDER_NOT_FOUND");
+                const block = getPaymentBlock(order, { allowReacquire: true });
+                if (block) throw apiError(block.message, block.status, block.code);
+                if (order.paymentStatus === "pending") return;
 
-                if (!order.reservationHeld) {
-                    for (const item of order.items) {
-                        const result = await productVariantModel.updateOne({
-                            _id: item.variantId,
-                            productId: item.productId,
-                            active: true,
-                            $expr: {
-                                $gte: [
-                                    { $subtract: ["$stockOnHand", "$reserved"] },
-                                    item.quantity
-                                ]
-                            }
-                        }, { $inc: { reserved: item.quantity } }, { session });
-                        if (result.modifiedCount !== 1) {
-                            throw apiError(`Insufficient stock for ${item.name} (${item.sku}).`, 409);
+                // Only a failed, still-payable order reaches this point.
+                if (order.reservationHeld) {
+                    // The original reservation and its deadline stay exactly as they were.
+                    transitionPayment(order, "pending", { actor: "customer", note: "Payment retry started." });
+                    await order.save({ session });
+                    return;
+                }
+                for (const item of order.items) {
+                    const result = await productVariantModel.updateOne({
+                        _id: item.variantId,
+                        productId: item.productId,
+                        active: true,
+                        $expr: {
+                            $gte: [
+                                { $subtract: ["$stockOnHand", "$reserved"] },
+                                item.quantity
+                            ]
                         }
+                    }, { $inc: { reserved: item.quantity } }, { session });
+                    if (result.modifiedCount !== 1) {
+                        throw apiError(`Insufficient stock for ${item.name} (${item.sku}).`, 409, "INSUFFICIENT_STOCK");
                     }
                 }
                 order.reservationHeld = true;
                 order.reservationExpiresAt = new Date(Date.now() + RESERVATION_DURATION_MS);
-                recordPaymentStatus(order, "pending");
+                transitionPayment(order, "pending", { actor: "customer", note: "Payment retry started; stock reserved again." });
                 await order.save({ session });
             });
         } finally {
@@ -452,10 +495,28 @@ export const retryRazorpayOrder = async (req, res) => {
         }
         return respondWithPaymentOrder(res, order);
     } catch (error) {
-        if (error.status) return res.status(error.status).json({ success: false, message: error.message });
+        if (error.status) return res.status(error.status).json(errorBody(error));
         console.error("Razorpay payment retry failed:", { name: error.name || "Error" });
         return res.status(503).json({ success: false, message: "Unable to retry payment right now." });
     }
+};
+
+// Records an authorized/failed attempt on a freshly read order inside a transaction so a concurrent capture,
+// cancellation or expiry can never be overwritten by a stale copy.
+const recordPaymentAttempt = async (orderId, payment, kind) => {
+    const session = await mongoose.startSession();
+    let current;
+    try {
+        await session.withTransaction(async () => {
+            current = await orderModel.findById(orderId).session(session);
+            if (!current) throw apiError("Payment order not found.", 404, "ORDER_NOT_FOUND");
+            const outcome = applyPaymentAttempt(current, payment, kind);
+            if (outcome === "recorded" || outcome === "flagged") await current.save({ session });
+        });
+    } finally {
+        await session.endSession();
+    }
+    return current;
 };
 
 export const verifyRazorpayPayment = async (req, res) => {
@@ -499,35 +560,21 @@ export const verifyRazorpayPayment = async (req, res) => {
                 fulfillmentHold: updated.fulfillmentHold
             });
         }
-        if (payment.status === "authorized") {
-            if (order.reservationHeld && order.reservationExpiresAt > new Date()) {
-                recordPaymentStatus(order, "authorized");
-                await order.save();
+        if (payment.status === "authorized" || payment.status === "failed") {
+            const current = await recordPaymentAttempt(order._id, payment, payment.status);
+            if (payment.status === "authorized") {
+                return res.status(202).json({
+                    success: false,
+                    paymentStatus: current.paymentStatus,
+                    message: "Payment is authorized but not captured yet. The order is not confirmed."
+                });
             }
-            return res.status(202).json({
+            // The reservation is deliberately kept: another attempt in the same payment window may still succeed.
+            return res.status(402).json({
                 success: false,
-                paymentStatus: order.paymentStatus,
-                message: "Payment is authorized but not captured yet. The order is not confirmed."
+                paymentStatus: current.paymentStatus,
+                message: "Payment failed. You may retry before the reservation expires."
             });
-        }
-        if (payment.status === "failed") {
-            if (order.reservationHeld) {
-                const session = await mongoose.startSession();
-                try {
-                    await session.withTransaction(async () => {
-                        const currentOrder = await orderModel.findById(order._id).session(session);
-                        if (!currentOrder || currentOrder.paymentStatus === "paid") return;
-                        if (currentOrder.reservationHeld) {
-                            await releaseReservation(currentOrder, session);
-                            recordPaymentStatus(currentOrder, "failed");
-                            await currentOrder.save({ session });
-                        }
-                    });
-                } finally {
-                    await session.endSession();
-                }
-            }
-            return res.status(402).json({ success: false, paymentStatus: "failed", message: "Payment failed. You may retry before the reservation expires." });
         }
         return res.status(202).json({
             success: false,
@@ -535,7 +582,7 @@ export const verifyRazorpayPayment = async (req, res) => {
             message: "Payment is still processing. Refresh your order status shortly."
         });
     } catch (error) {
-        if (error.status) return res.status(error.status).json({ success: false, message: error.message });
+        if (error.status) return res.status(error.status).json(errorBody(error));
         console.error("Razorpay verification failed:", { name: error.name || "Error" });
         return res.status(503).json({
             success: false,
@@ -597,7 +644,14 @@ export const releaseExpiredRazorpayReservations = async () => {
                     !["pending", "authorized", "failed"].includes(order.paymentStatus) ||
                     order.reservationExpiresAt > new Date()) return;
                 await releaseReservation(order, session);
-                recordPaymentStatus(order, "expired");
+                const wasAuthorized = order.paymentStatus === "authorized";
+                transitionPayment(order, "expired", { note: "Payment window ended." });
+                if (wasAuthorized) {
+                    flagReview(order, REVIEW_REASONS.AUTHORIZED_ON_CLOSED_ORDER, {
+                        hold: false,
+                        note: "Reservation expired while a payment was authorized but not captured."
+                    });
+                }
                 await order.save({ session });
             });
         } catch (error) {

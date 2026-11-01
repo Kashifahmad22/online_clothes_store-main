@@ -1,7 +1,7 @@
 import PropTypes from 'prop-types'
 
-const ProductPrice = ({ price, mrp, compact = false }) => {
-  const hasDiscount = Number.isFinite(price) && Number.isFinite(mrp) && mrp > price
+const ProductPrice = ({ price, mrp, compact = false, from = false }) => {
+  const hasDiscount = !from && Number.isFinite(price) && Number.isFinite(mrp) && mrp > price
   const discountPercent = hasDiscount
     ? ((mrp - price) / mrp * 100).toLocaleString('en-IN', { maximumFractionDigits: 1 })
     : '0'
@@ -11,7 +11,7 @@ const ProductPrice = ({ price, mrp, compact = false }) => {
   return (
     <div className='flex flex-wrap items-baseline gap-x-2 gap-y-1'>
       <span className={`${compact ? 'text-base' : 'text-2xl'} font-semibold text-rose-950`}>
-        ₹{price.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+        {from && <span className='product-price__from'>From </span>}₹{price.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
       </span>
       {hasDiscount && (
         <>
@@ -28,7 +28,8 @@ const ProductPrice = ({ price, mrp, compact = false }) => {
 ProductPrice.propTypes = {
   price: PropTypes.number,
   mrp: PropTypes.number,
-  compact: PropTypes.bool
+  compact: PropTypes.bool,
+  from: PropTypes.bool
 }
 
 export default ProductPrice

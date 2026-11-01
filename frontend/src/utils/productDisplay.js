@@ -53,15 +53,37 @@ export const getProductImage = product => {
   return images.find(image => image.role === 'primary') || images[0] || null
 }
 
-export const getStartingPrice = product => {
-  if (Number.isFinite(product?.startingPrice)) return product.startingPrice
-  const availableVariants = (product?.variants || []).filter(isVariantAvailable)
-  const prices = availableVariants.map(variant => variant.price)
-    .filter(price => Number.isFinite(price) && price >= 0)
-  if (prices.length) return Math.min(...prices)
-  if (Number.isFinite(product?.price)) return product.price
-  return null
+const toPaise = value => (Number.isFinite(value) && value >= 0 ? Math.round(value * 100) : null)
+
+// Card price semantics. Only active variants with a valid price are compared (public prices are rupees; they are
+// compared in whole paise to avoid float noise). With no usable variant the product's own price is used.
+// `from` is true only when active variants genuinely differ, and the discount is then withheld: the single MRP
+// is a product-level value and cannot honestly describe a range of prices.
+export const getPriceSummary = product => {
+  const prices = (product?.variants || [])
+    .filter(variant => variant && variant.active !== false)
+    .map(variant => toPaise(variant.price))
+    .filter(paise => paise !== null)
+  const lowest = prices.length ? Math.min(...prices) : toPaise(product?.price)
+  if (lowest === null) return { price: null, from: false, mrp: null }
+  const from = prices.length > 0 && Math.max(...prices) > lowest
+  const price = lowest / 100
+  const mrp = !from && Number.isFinite(product?.mrp) && product.mrp > price ? product.mrp : null
+  return { price, from, mrp }
 }
+
+const PLACEHOLDER_VALUE = /^(?:n\/?a|na|none|null|undefined|nil|tbd|not specified|unknown|-+|\.+)$/i
+
+// Fabric and colour come only from the admin-entered `details` of the public product; nothing is inferred.
+export const getCardAttributes = product => ['fabric', 'colour'].flatMap(key => {
+  const value = product?.details?.[key]
+  if (typeof value !== 'string') return []
+  const clean = value.replace(/\s+/g, ' ').trim()
+  return clean && !PLACEHOLDER_VALUE.test(clean) ? [clean.slice(0, 40)] : []
+})
+
+// Low-stock urgency uses the backend-derived flag only, and never for an unavailable product.
+export const showLowStockNote = product => product?.lowStock === true && getAvailableStock(product) > 0
 
 export const getAvailableStock = product => (product?.variants || [])
   .filter(isVariantAvailable)

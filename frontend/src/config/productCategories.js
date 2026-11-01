@@ -67,7 +67,12 @@ export const storefrontCategories = CANONICAL_CATEGORIES.map(({ slug, label, sta
   ...(status === 'available' ? { alwaysAvailable: true } : {})
 }))
 
-export const storefrontNavigation = products => {
+// `catalogue` is the load state of the product list. Only a successfully loaded ('ready') catalogue can show a
+// category as upcoming; while it is loading or failed, availability is unknown and must not read "Coming soon".
+export const catalogueState = ({ productsLoading, productsError }) =>
+  productsLoading ? 'loading' : productsError ? 'error' : 'ready'
+
+export const storefrontNavigation = (products, catalogue = 'ready') => {
   const firstProduct = new Map()
   for (const product of products) {
     const slug = resolveProductCategory(product).category?.slug
@@ -75,7 +80,8 @@ export const storefrontNavigation = products => {
   }
   return storefrontCategories.map(({ slug, label, alwaysAvailable }) => {
     const product = firstProduct.get(slug) || null
-    return { slug, label, product, status: alwaysAvailable || product ? 'available' : 'upcoming' }
+    const status = alwaysAvailable || product ? 'available' : catalogue === 'ready' ? 'upcoming' : 'unknown'
+    return { slug, label, product, status }
   })
 }
 
