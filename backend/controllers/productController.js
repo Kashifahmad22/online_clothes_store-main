@@ -11,6 +11,7 @@ import {
     validatePublishableProduct
 } from "../utils/catalogueValidation.js";
 import { parseCatalogueQuery } from "../utils/catalogueQuery.js";
+import { buildPagination, isAdminProductId, parseAdminCatalogueQuery } from "../utils/adminCatalogueQuery.js";
 import { resolveBadgeFlags } from "../utils/merchandising.js";
 import { buildStockAdjustment, parseStockAdjustment, toStockSummary } from "../utils/stockAdjustment.js";
 import { assertStatusTransition, resolveStatusForEdit } from "../utils/productStatus.js";
@@ -93,7 +94,7 @@ const getProductsWithVariants = async (products, includeInactive = false) => {
     const ids = products.map(product => product._id);
     const variantQuery = { productId: { $in: ids } };
     if (!includeInactive) variantQuery.active = true;
-    const variants = await productVariantModel.find(variantQuery).sort({ createdAt: 1 });
+    const variants = await productVariantModel.find(variantQuery).sort({ createdAt: 1, _id: 1 });
     const byProduct = new Map();
     for (const variant of variants) {
         const key = variant.productId.toString();
@@ -339,11 +340,30 @@ const listCatalogueFacets = async (req, res) => {
 
 const listAdminProducts = async (req, res) => {
     try {
-        const products = await productModel.find({}).sort({ updatedAt: -1 });
+        const query = parseAdminCatalogueQuery(req.query);
+        const [totalProducts, products] = await Promise.all([
+            productModel.countDocuments({}),
+            productModel.find({}).sort(query.sort).skip(query.skip).limit(query.limit)
+        ]);
         return res.json({
             success: true,
-            products: await getProductsWithVariants(products, true)
+            products: await getProductsWithVariants(products, true),
+            pagination: buildPagination({ page: query.page, limit: query.limit, totalProducts })
         });
+    } catch (error) {
+        return respondError(res, error);
+    }
+};
+
+const adminSingleProduct = async (req, res) => {
+    try {
+        if (!isAdminProductId(req.params.productId)) {
+            return res.status(400).json({ success: false, message: "A valid product ID is required." });
+        }
+        const product = await productModel.findById(req.params.productId);
+        if (!product) return res.status(404).json({ success: false, message: "Product not found." });
+        const [shaped] = await getProductsWithVariants([product], true);
+        return res.json({ success: true, product: shaped });
     } catch (error) {
         return respondError(res, error);
     }
@@ -431,4 +451,4 @@ const adjustStock = async (req, res) => {
     }
 };
 
-export { addProduct, adjustStock, listProducts, listCatalogueFacets, listAdminProducts, singleProduct, updateProduct, updateProductStatus };
+export { addProduct, adjustStock, adminSingleProduct, listProducts, listCatalogueFacets, listAdminProducts, singleProduct, updateProduct, updateProductStatus };

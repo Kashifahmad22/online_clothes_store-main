@@ -8,6 +8,7 @@ import { HIGHLIGHT_OPTIONS, applyHighlight, highlightFromProduct } from '../util
 import StockAdjuster from '../components/StockAdjuster'
 import { isArchived, statusLabel } from '../utils/productStatus'
 import { setUnsavedChanges, hasUnsavedChanges, LEAVE_MESSAGE } from '../utils/unsavedChanges'
+import { resolveLoadState } from '../utils/catalogueList'
 
 // Saved SKUs are tracked by id; stock figures change only through the stock endpoint, so they are not "edits".
 const formSnapshot = (product, collectionTags) => JSON.stringify({
@@ -132,21 +133,39 @@ const Add = ({ token }) => {
 
   useEffect(() => () => previews.forEach(item => URL.revokeObjectURL(item.url)), [previews])
 
+  const formKey = editId || ''
+  // The load result is tagged with the product it belongs to. Whenever it differs from the current ?id=,
+  // the form is treated as loading, so the previous product can never render for even one frame.
+  const [loadInfo, setLoadInfo] = useState({ key: formKey, state: editId ? 'loading' : 'ready', message: '' })
+  const loadState = resolveLoadState(loadInfo, formKey)
+  const loadMessage = loadInfo.message
+  const [reloadKey, setReloadKey] = useState(0)
+
   useEffect(() => {
     if (!editId) {
       setProduct(blankProduct())
       setCollectionTags('')
+      setUploads([])
       setBaseline(formSnapshot(blankProduct(), ''))
-      return
+      setLoadInfo({ key: '', state: 'ready', message: '' })
+      return undefined
     }
 
-    axios.get(`${backendUrl}/api/product/admin/list`, { headers: { token } })
+    // Reset to a clean blank form so a previous product's data or dirty state can never leak in.
+    setLoadInfo({ key: editId, state: 'loading', message: '' })
+    setProduct(blankProduct())
+    setCollectionTags('')
+    setUploads([])
+    setBaseline(formSnapshot(blankProduct(), ''))
+    const controller = new AbortController()
+    axios.get(`${backendUrl}/api/product/admin/${encodeURIComponent(editId)}`, {
+      headers: { token },
+      signal: controller.signal
+    })
       .then(({ data }) => {
-        const found = data.products?.find(item => item._id === editId)
-        if (!found) {
-          toast.error('Product not found.')
-          return
-        }
+        if (controller.signal.aborted) return
+        const found = data.product
+        if (!data.success || !found || found._id !== editId) throw new Error('The server returned an unexpected response.')
         const loaded = {
           ...blankProduct(),
           ...found,
@@ -166,9 +185,24 @@ const Add = ({ token }) => {
         setProduct(loaded)
         setCollectionTags(tags)
         setBaseline(formSnapshot(loaded, tags))
+        setLoadInfo({ key: editId, state: 'ready', message: '' })
       })
-      .catch(() => toast.error('Unable to load product for editing.'))
-  }, [editId, token])
+      .catch(error => {
+        if (axios.isCancel(error) || controller.signal.aborted) return
+        if (error.response?.status === 404) {
+          setLoadInfo({ key: editId, state: 'notfound', message: 'Product not found. It may have been removed.' })
+        } else if (error.response?.status === 400) {
+          setLoadInfo({ key: editId, state: 'notfound', message: 'This product link is not valid.' })
+        } else {
+          setLoadInfo({
+            key: editId,
+            state: 'error',
+            message: error.response?.data?.message || 'Unable to load the product. Check your connection and try again.'
+          })
+        }
+      })
+    return () => controller.abort()
+  }, [editId, token, reloadKey])
 
   const setField = (field, value) => setProduct(current => ({ ...current, [field]: value }))
   const setDetail = (field, value) => setProduct(current => ({
@@ -412,6 +446,25 @@ const Add = ({ token }) => {
     ...current,
     images: current.images.filter((_, imageIndex) => imageIndex !== index)
   }))
+
+  if (loadState !== 'ready') {
+    return (
+      <section className='text-sm'>
+        {loadState === 'loading' && <p role='status' className='py-6 text-gray-500'>Loading product…</p>}
+        {loadState !== 'loading' && (
+          <div role='alert' className='border border-red-300 bg-red-50 p-4'>
+            <p className='text-red-700'>{loadMessage}</p>
+            <div className='mt-3 flex gap-2'>
+              {loadState === 'error' && (
+                <button type='button' onClick={() => setReloadKey(key => key + 1)} className='border px-4 py-2'>Retry</button>
+              )}
+              <button type='button' onClick={() => navigate('/list')} className='border px-4 py-2'>Back to catalogue</button>
+            </div>
+          </div>
+        )}
+      </section>
+    )
+  }
 
   return (
     <form onSubmit={onSubmitHandler} className='flex flex-col w-full items-start gap-5'>

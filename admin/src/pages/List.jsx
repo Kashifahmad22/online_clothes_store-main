@@ -1,26 +1,65 @@
 import axios from 'axios'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { backendUrl, currency } from '../App'
 import { toast } from 'react-toastify'
 import { statusButtons, statusConfirmMessage, statusLabel } from '../utils/productStatus'
 import { availableStock } from '../utils/stockAdjustment'
+import { PAGE_SIZE, correctedPage, createLatestGate, loadErrorMessage, pageSummary, parsePageParam } from '../utils/catalogueList'
 
 const List = ({ token }) => {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const page = parsePageParam(searchParams.get('page'))
   const [list, setList] = useState([])
+  const [pagination, setPagination] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [busyId, setBusyId] = useState('')
   const busyRef = useRef(false)
+  const gate = useMemo(() => createLatestGate(), [])
+  const controllerRef = useRef(null)
+
+  const goToPage = useCallback((target, replace = false) => {
+    const next = new URLSearchParams(searchParams)
+    if (target <= 1) next.delete('page')
+    else next.set('page', String(target))
+    setSearchParams(next, { replace })
+  }, [searchParams, setSearchParams])
 
   const fetchList = useCallback(async () => {
+    controllerRef.current?.abort()
+    const controller = new AbortController()
+    controllerRef.current = controller
+    const requestId = gate.next()
+    setLoading(true)
+    setLoadError('')
     try {
-      const response = await axios.get(`${backendUrl}/api/product/admin/list`, { headers: { token } })
-      if (response.data.success) setList(response.data.products)
-      else toast.error(response.data.message)
+      const response = await axios.get(`${backendUrl}/api/product/admin/list`, {
+        headers: { token },
+        params: { page, limit: PAGE_SIZE },
+        signal: controller.signal
+      })
+      if (!gate.isCurrent(requestId)) return
+      if (!response.data.success || !Array.isArray(response.data.products) || !response.data.pagination) {
+        throw new Error(response.data.message || 'The server returned an unexpected response.')
+      }
+      const fix = correctedPage({ page, totalPages: response.data.pagination.totalPages })
+      if (fix !== null) {
+        goToPage(fix, true)
+        return
+      }
+      setList(response.data.products)
+      setPagination(response.data.pagination)
+      setLoading(false)
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Unable to load products.')
+      if (!gate.isCurrent(requestId) || axios.isCancel(error)) return
+      setList([])
+      setPagination(null)
+      setLoadError(loadErrorMessage(error))
+      setLoading(false)
     }
-  }, [token])
+  }, [token, page, gate, goToPage])
 
   const updateStatus = async (product, button) => {
     if (busyRef.current) return
@@ -44,7 +83,13 @@ const List = ({ token }) => {
     }
   }
 
-  useEffect(() => { fetchList() }, [fetchList])
+  useEffect(() => {
+    fetchList()
+    return () => { controllerRef.current?.abort(); gate.invalidate() }
+  }, [fetchList, gate])
+
+  const summary = pagination ? pageSummary(pagination) : null
+  const showTable = !loadError && summary
 
   return (
     <section>
@@ -52,7 +97,18 @@ const List = ({ token }) => {
         <h1 className='font-medium'>Product catalogue</h1>
         <Link to='/add' className='border px-4 py-2'>Add product</Link>
       </div>
-      <div className='flex flex-col gap-2'>
+      {loading && !summary && !loadError && <p role='status' className='py-6 text-gray-500'>Loading products…</p>}
+      {loadError && (
+        <div role='alert' className='border border-red-300 bg-red-50 p-4 text-sm'>
+          <p className='text-red-700'>{loadError}</p>
+          <button type='button' onClick={fetchList} disabled={loading}
+            className='mt-3 border px-4 py-2 disabled:opacity-40'>
+            {loading ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      )}
+      {showTable && (
+      <div className={`flex flex-col gap-2 ${loading ? 'opacity-60' : ''}`} aria-busy={loading}>
         <div className='hidden md:grid grid-cols-[0.7fr_2fr_1fr_0.8fr_1.2fr_1fr] items-center py-2 px-2 border bg-gray-100 text-sm'>
           <b>Image</b><b>Product</b><b>Type</b><b>Price</b><b>SKU / Stock</b><b>Status</b>
         </div>
@@ -87,6 +143,24 @@ const List = ({ token }) => {
         ))}
         {list.length === 0 && <p className='py-6 text-gray-500'>No products yet.</p>}
       </div>
+      )}
+      {showTable && (
+        <nav aria-label='Catalogue pagination' className='mt-4 flex flex-wrap items-center justify-between gap-3 text-sm'>
+          <p>
+            {summary.totalProducts === 0
+              ? '0 products'
+              : `Showing ${summary.from}–${summary.to} of ${summary.totalProducts} products · Page ${summary.page} of ${summary.totalPages}`}
+          </p>
+          <div className='flex gap-2'>
+            <button type='button' onClick={() => goToPage(page - 1)}
+              disabled={loading || !summary.hasPrevious}
+              className='border px-4 py-2 min-h-[44px] disabled:opacity-40'>Previous</button>
+            <button type='button' onClick={() => goToPage(page + 1)}
+              disabled={loading || !summary.hasNext}
+              className='border px-4 py-2 min-h-[44px] disabled:opacity-40'>Next</button>
+          </div>
+        </nav>
+      )}
     </section>
   )
 }
