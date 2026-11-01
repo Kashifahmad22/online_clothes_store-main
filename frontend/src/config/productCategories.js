@@ -1,5 +1,10 @@
-import { categorySlug } from './campaigns.js'
+import {
+  CANONICAL_CATEGORIES, categoryById, normalizeCategoryLabel, resolveCategorySlug, resolveProductCategory
+} from './canonicalCategories.js'
+import { categoryFromSlug } from './campaigns.js'
 
+// Legacy product-type table. It only labels the "Product type" filter and old type-derived URLs;
+// top-level navigation comes from the canonical categories.
 export const productCategories = [
   { type: 'saree', slug: 'sarees', label: 'Sarees' },
   { type: 'suit', slug: 'suits', label: 'Suits' },
@@ -7,61 +12,71 @@ export const productCategories = [
   { type: 'dress', slug: 'dresses', label: 'Dresses' },
   { type: 'suit-piece', slug: 'suit-pieces', label: 'Suit pieces' },
   { type: 'lehenga', slug: 'lehengas', label: 'Lehengas' },
+  { type: 'kurti', slug: 'kurtis', label: 'Kurtis' },
   { type: 'other', slug: 'other', label: 'Other ethnic wear' }
 ]
 
-export const categoryForType = type => productCategories.find(category => category.type === type) || {
-  type,
-  slug: type.replace(/_/g, '-').replace(/-+$/, '') + (type.endsWith('s') ? '' : 's'),
-  label: type.replace(/[-_]/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase())
-}
-
 export const categoryForSlug = slug => productCategories.find(category => category.slug === slug)
 
-export const availableProductCategories = products => {
-  const categories = new Map()
-  for (const product of products) {
-    const typeCategory = categoryForType(product.productType)
-    if (product.productType !== 'other' || !product.category) {
-      categories.set(typeCategory.slug, { ...typeCategory, product })
-    }
+// The Category filter offers exactly the canonical categories, never raw free-text labels.
+export const categoryFilterOptions = CANONICAL_CATEGORIES.map(({ id, label }) => ({ value: id, label }))
 
-    const label = typeof product.category === 'string' ? product.category.trim() : ''
-    const slug = label ? categorySlug(label) : ''
-    if (!slug) continue
-    const category = categoryForSlug(slug)
-    if (category) {
-      if (!categories.has(category.slug)) categories.set(category.slug, { ...category, product })
-    } else if (!categories.has(slug)) {
-      categories.set(slug, { type: `category:${slug}`, slug, label, product })
+// Single place that turns the route/URL state into the product list request for the Collection page.
+// Category pages and the ?category= filter both end in the same `canonicalCategory` parameter. A recognised
+// legacy subcategory label (Silk Sarees, Cotton Sarees, Suit Pants) keeps its parent category and also
+// yields `subCategory`, so the narrower legacy link stays narrow. A label with no canonical meaning is
+// still sent as the old exact-match `category` filter and never mapped to a category.
+export const collectionCategoryParams = ({ mode, routeCategory, categoryParam = '', productTypeParam = '' }) => {
+  if (mode === 'category') {
+    const resolved = resolveCategorySlug(routeCategory)
+    if (resolved) {
+      return {
+        canonical: resolved.category,
+        subCategory: resolved.subCategory,
+        productType: resolved.productType || '',
+        legacyLabel: resolved.legacyLabel || '',
+        category: ''
+      }
+    }
+    const productType = categoryForSlug(routeCategory)?.type || ''
+    return {
+      canonical: null,
+      subCategory: null,
+      productType,
+      category: productType ? '' : categoryFromSlug(routeCategory || '')
     }
   }
-  return [...categories.values()]
+  const raw = typeof categoryParam === 'string' ? categoryParam.trim() : ''
+  const byId = raw ? categoryById(raw) : null
+  const label = raw && !byId ? normalizeCategoryLabel(raw) : null
+  const canonical = byId || label?.category || null
+  return {
+    canonical,
+    subCategory: label?.subCategory || null,
+    productType: productTypeParam,
+    category: raw && !canonical ? raw : ''
+  }
 }
 
-// Public assortment shown in navigation and on the homepage. Sarees is the live range; the others
-// become shoppable automatically once a product exists for them, and stay "Coming soon" until then.
-export const storefrontCategories = [
-  { slug: 'sarees', label: 'Sarees', alwaysAvailable: true },
-  { slug: 'suit-pieces', label: 'Suit Pieces' },
-  { slug: 'lehengas', label: 'Lehengas' },
-  { slug: 'kurtis', label: 'Kurtis' }
-]
+// Public assortment: always exactly the four canonical categories, never derived from product labels.
+// Sarees is live; the others become shoppable once a product resolves to them and are "Coming soon"
+// until then.
+export const storefrontCategories = CANONICAL_CATEGORIES.map(({ slug, label, status }) => ({
+  slug,
+  label,
+  ...(status === 'available' ? { alwaysAvailable: true } : {})
+}))
 
 export const storefrontNavigation = products => {
-  const live = availableProductCategories(products)
-  const liveBySlug = new Map(live.map(category => [category.slug, category]))
-  const featuredSlugs = new Set(storefrontCategories.map(category => category.slug))
-  const featured = storefrontCategories.map(({ slug, label, alwaysAvailable }) => {
-    const match = liveBySlug.get(slug)
-    if (match) return { ...match, label, status: 'available' }
-    return alwaysAvailable
-      ? { slug, label, type: 'saree', product: null, status: 'available' }
-      : { slug, label, product: null, status: 'upcoming' }
+  const firstProduct = new Map()
+  for (const product of products) {
+    const slug = resolveProductCategory(product).category?.slug
+    if (slug && !firstProduct.has(slug)) firstProduct.set(slug, product)
+  }
+  return storefrontCategories.map(({ slug, label, alwaysAvailable }) => {
+    const product = firstProduct.get(slug) || null
+    return { slug, label, product, status: alwaysAvailable || product ? 'available' : 'upcoming' }
   })
-  const others = live.filter(category => !featuredSlugs.has(category.slug))
-    .map(category => ({ ...category, status: 'available' }))
-  return [...featured, ...others]
 }
 
 export const isUpcomingStorefrontCategory = (slug, products) =>

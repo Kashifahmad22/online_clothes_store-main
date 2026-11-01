@@ -1,5 +1,6 @@
 import { campaignBySlug, categoryFromSlug } from '../config/campaigns.js'
 import { categoryForSlug } from '../config/productCategories.js'
+import { resolveCategorySlug } from '../config/canonicalCategories.js'
 import { policyByPath } from '../config/policies.js'
 import { socialImageUrl } from './images.js'
 import { availableQuantity } from './productDisplay.js'
@@ -56,7 +57,7 @@ export const buildPageMeta = ({ pathname, brandName, description, siteUrl, image
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
   let title = STATIC_TITLES(brandName)[path]
   let pageDescription = description
-
+  let canonicalPath = path
   if (path === '/collection') {
     pageDescription = `Browse sarees and ethnic wear from ${brandName}.`
   } else if (path === '/contact') {
@@ -71,15 +72,18 @@ export const buildPageMeta = ({ pathname, brandName, description, siteUrl, image
     pageDescription = campaign?.description || `Browse the ${categoryFromSlug(slug)} collection from ${brandName}.`
   } else if (path.startsWith('/category/')) {
     const slug = path.split('/').pop()
-    const label = categoryForSlug(slug)?.label || categoryFromSlug(slug)
+    const resolved = resolveCategorySlug(slug)
+    const label = resolved?.legacyLabel || resolved?.subCategory || resolved?.category.label || categoryForSlug(slug)?.label || categoryFromSlug(slug)
     title = `${label} | ${brandName}`
     pageDescription = `Browse ${label.toLowerCase()} from ${brandName}.`
+    // Legacy slugs keep working but point search engines at the canonical category URL.
+    if (resolved) canonicalPath = `/category/${resolved.category.slug}`
   }
 
   return {
     title: title || brandName,
     description: pageDescription,
-    canonicalUrl: `${siteUrl}${path === '/' ? '/' : path}`,
+    canonicalUrl: `${siteUrl}${canonicalPath === '/' ? '/' : canonicalPath}`,
     image,
     type: 'website'
   }

@@ -47,10 +47,45 @@ test('a category becomes shoppable only when a live product exists for it', () =
   assert.deepEqual(statuses(products), { sarees: 'available', 'suit-pieces': 'upcoming', lehengas: 'available', kurtis: 'available' })
 })
 
-test('other live categories are appended after the four featured ones', () => {
-  const nav = storefrontNavigation([{ _id: '1', productType: 'saree' }, { _id: '2', productType: 'dress' }])
-  assert.deepEqual(nav.map(c => c.slug), ['sarees', 'suit-pieces', 'lehengas', 'kurtis', 'dresses'])
-  assert.equal(nav[4].status, 'available')
+test('navigation never grows beyond the four canonical categories, whatever labels or types products carry', () => {
+  const products = [
+    { _id: '1', productType: 'saree', category: 'Silk Sarees' },
+    { _id: '2', productType: 'dress', category: 'Dresses' },
+    { _id: '3', productType: 'other', category: 'Dupatta' },
+    { _id: '4', productType: 'suit-piece', category: 'Suit Pants' },
+    { _id: '5', productType: 'other', category: 'cotton  SAREES' },
+    { _id: '6', productType: 'saree', category: 'Cotton Sarees' }
+  ]
+  const nav = storefrontNavigation(products)
+  assert.deepEqual(nav.map(c => c.slug), ['sarees', 'suit-pieces', 'lehengas', 'kurtis'])
+  assert.deepEqual(new Set(nav.map(c => c.slug)).size, 4)
+  for (const slug of ['suit-pants', 'silk-sarees', 'cotton-sarees', 'dresses', 'dupatta', 'other', 'suits']) {
+    assert.equal(nav.some(c => c.slug === slug), false, slug)
+  }
+})
+
+test('label and case variants resolve to one entry each and never add duplicates', () => {
+  const variants = ['Lehenga', 'lehengas', ' LEHENGA ', 'Lehengas'].map((category, index) => ({ _id: String(index), productType: 'other', category }))
+  const nav = storefrontNavigation(variants)
+  assert.equal(nav.filter(c => c.slug === 'lehengas').length, 1)
+  assert.equal(nav.length, 4)
+})
+
+test('productType wins over a conflicting label when assigning navigation status', () => {
+  assert.deepEqual(statuses([{ _id: '1', productType: 'saree', category: 'Kurti' }]),
+    { sarees: 'available', 'suit-pieces': 'upcoming', lehengas: 'upcoming', kurtis: 'upcoming' })
+})
+
+test('suit, suit-set, suit-piece and kurti types make their canonical categories shoppable', () => {
+  for (const [productType, slug] of [['suit', 'suit-pieces'], ['suit-set', 'suit-pieces'], ['suit-piece', 'suit-pieces'],
+    ['kurti', 'kurtis'], ['lehenga', 'lehengas']]) {
+    assert.equal(statuses([{ _id: '1', productType }])[slug], 'available', productType)
+  }
+})
+
+test('dress and other products with unknown labels create no category', () => {
+  assert.deepEqual(statuses([{ _id: '1', productType: 'dress', category: 'Dresses' }, { _id: '2', productType: 'other', category: 'Dupatta' }]),
+    statuses([]))
 })
 
 test('navigation renders upcoming items as non-links with a Coming soon label', () => {

@@ -13,6 +13,7 @@ export const TYPE_OPTIONS = [
   { value: 'suit-set', label: 'Suit set' },
   { value: 'dress', label: 'Dress' },
   { value: 'lehenga', label: 'Lehenga' },
+  { value: 'kurti', label: 'Kurti' },
   { value: 'other', label: 'Other ethnic wear' }
 ]
 

@@ -1,3 +1,5 @@
+import { PRODUCT_TYPES } from "../config/catalogueTaxonomy.js";
+
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 const MAX_PAGE = 1000000;
@@ -49,7 +51,7 @@ export const buildAdminPricePipeline = (filter, query, variantCollection) => [
     { $project: { _id: 1 } }
 ];
 export const ADMIN_STATUSES = Object.freeze(["published", "draft", "archived"]);
-export const ADMIN_PRODUCT_TYPES = Object.freeze(["saree", "suit-piece", "suit", "suit-set", "dress", "lehenga", "other"]);
+export const ADMIN_PRODUCT_TYPES = PRODUCT_TYPES;
 export const ADMIN_STOCK_STATES = Object.freeze(["in-stock", "low-stock", "out-of-stock"]);
 export const ADMIN_BADGES = Object.freeze(["bestseller", "fastSelling", "none"]);
 const ALLOWED_PARAMS = new Set(["page", "limit", "sort", "search", "status", "category", "productType", "stock", "badge"]);

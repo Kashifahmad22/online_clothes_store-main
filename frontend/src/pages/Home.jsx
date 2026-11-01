@@ -8,6 +8,7 @@ import OptimizedImage from '../components/OptimizedImage'
 import { campaigns } from '../config/campaigns'
 import { getProductImage } from '../utils/productDisplay'
 import { storefrontNavigation } from '../config/productCategories'
+import { resolveProductCategory } from '../config/canonicalCategories'
 
 const CategoryMotif = () => (
   <svg className='category-tile__motif' viewBox='0 0 64 64' aria-hidden='true' focusable='false'>
@@ -25,11 +26,8 @@ const Home = () => {
   const categories = useMemo(() => storefrontNavigation(products)
     .map(category => {
       const product = category.status === 'available'
-        ? products.find(item =>
-          (category.type?.startsWith('category:')
-            ? item.category === category.label
-            : item.productType === category.type) && getProductImage(item)
-        ) || (category.product && getProductImage(category.product) ? category.product : null)
+        ? products.find(item => resolveProductCategory(item).category?.slug === category.slug && getProductImage(item))
+          || (category.product && getProductImage(category.product) ? category.product : null)
         : null
       return { name: category.label, slug: category.slug, status: category.status, path: `/category/${category.slug}`, product }
     })

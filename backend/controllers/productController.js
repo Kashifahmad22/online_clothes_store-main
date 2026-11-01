@@ -328,8 +328,6 @@ const listCatalogueFacets = async (req, res) => {
     try {
         const published = { status: "published" };
         const fields = {
-            categories: "category",
-            productTypes: "productType",
             fabrics: "details.fabric",
             colours: "details.colour",
             occasions: "details.occasion"
@@ -341,6 +339,8 @@ const listCatalogueFacets = async (req, res) => {
                 .map(value => value.trim())
                 .sort((left, right) => left.localeCompare(right))];
         }));
+        // Category and productType are deliberately not facets: categories come from the canonical taxonomy
+        // and productType is an internal classification.
         return res.json({ success: true, facets: Object.fromEntries(facets) });
     } catch (error) {
         return respondError(res, error);

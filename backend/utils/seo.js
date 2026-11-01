@@ -1,5 +1,6 @@
 // Pure helpers for crawler-facing HTML, structured data and the sitemap. Nothing here touches
 // the database or the network, so every function is directly unit-testable.
+import { resolveProductCategory } from "../config/catalogueTaxonomy.js";
 
 const CLOUDINARY_UPLOAD = /^(https:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/)(.+)$/;
 
@@ -193,16 +194,7 @@ export const renderUnavailableHtml = ({ siteUrl, brandName }) => `<!doctype html
 </html>
 `;
 
-// Mirrors frontend/src/config/productCategories.js and campaigns.js; keep the slugs in sync.
-const TYPE_CATEGORY_SLUGS = {
-    saree: "sarees",
-    suit: "suits",
-    "suit-set": "suit-sets",
-    dress: "dresses",
-    "suit-piece": "suit-pieces",
-    lehenga: "lehengas",
-    other: "other"
-};
+// Campaign slugs mirror frontend/src/config/campaigns.js; keep them in sync.
 const CAMPAIGNS = [
     { slug: "dhanteras", tag: "Dhanteras" },
     { slug: "diwali", tag: "Diwali" },
@@ -215,18 +207,10 @@ export const POLICY_PATHS = {
     returns: "/returns-policy"
 };
 
-const slugify = value => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-
+// Only canonical top-level category pages are indexable; a product contributes at most one.
 export const categorySlugsFor = product => {
-    const slugs = new Set();
-    const label = typeof product.category === "string" ? product.category.trim() : "";
-    if (product.productType !== "other" || !label) {
-        const typeSlug = TYPE_CATEGORY_SLUGS[product.productType];
-        if (typeSlug) slugs.add(typeSlug);
-    }
-    const labelSlug = label ? slugify(label) : "";
-    if (labelSlug) slugs.add(labelSlug);
-    return slugs;
+    const { category } = resolveProductCategory(product);
+    return new Set(category ? [category.slug] : []);
 };
 
 const toIso = value => {

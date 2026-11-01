@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { PRODUCT_TYPES } from "../config/catalogueTaxonomy.js";
 
 const imageSchema = new mongoose.Schema({
     url: { type: String, required: true },
@@ -18,7 +19,7 @@ const productSchema = new mongoose.Schema({
     productType: {
         type: String,
         required: true,
-        enum: ["saree", "suit-piece", "suit", "suit-set", "dress", "lehenga", "other"]
+        enum: PRODUCT_TYPES
     },
     category: { type: String, required: true, trim: true },
     subCategory: { type: String, trim: true, default: "" },

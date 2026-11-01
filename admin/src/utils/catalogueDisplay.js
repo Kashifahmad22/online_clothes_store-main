@@ -63,5 +63,5 @@ export const priceInfo = product => {
 
 export const productTypeLabel = value => ({
   saree: 'Saree', 'suit-piece': 'Suit piece', suit: 'Suit', 'suit-set': 'Suit set',
-  dress: 'Dress', lehenga: 'Lehenga', other: 'Other ethnic wear'
+  dress: 'Dress', lehenga: 'Lehenga', kurti: 'Kurti', other: 'Other ethnic wear'
 }[value] || value || '—')

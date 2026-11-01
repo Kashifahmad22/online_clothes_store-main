@@ -387,10 +387,33 @@ test("sitemap XML escapes special characters and handles missing dates", () => {
     assert.equal(/&(?!amp;|lt;|gt;|quot;|#39;)/.test(xml), false);
 });
 
-test("category slugs mirror the storefront category rules", () => {
-    assert.deepEqual([...categorySlugsFor({ productType: "saree", category: "Silk Sarees" })], ["sarees", "silk-sarees"]);
-    assert.deepEqual([...categorySlugsFor({ productType: "other", category: "" })], ["other"]);
-    assert.deepEqual([...categorySlugsFor({ productType: "other", category: "Dupatta" })], ["dupatta"]);
+test("category slugs are canonical top-level categories only, at most one per product", () => {
+    assert.deepEqual([...categorySlugsFor({ productType: "saree", category: "Silk Sarees" })], ["sarees"]);
+    assert.deepEqual([...categorySlugsFor({ productType: "suit-piece", category: "Suit Pants" })], ["suit-pieces"]);
+    assert.deepEqual([...categorySlugsFor({ productType: "kurti", category: "Kurtis" })], ["kurtis"]);
+    assert.deepEqual([...categorySlugsFor({ productType: "lehenga", category: "Lehenga" })], ["lehengas"]);
+    assert.deepEqual([...categorySlugsFor({ productType: "other", category: " cotton   SAREES " })], ["sarees"]);
+    assert.deepEqual([...categorySlugsFor({ productType: "other", category: "" })], []);
+    assert.deepEqual([...categorySlugsFor({ productType: "other", category: "Dupatta" })], []);
+    assert.deepEqual([...categorySlugsFor({ productType: "dress", category: "Dresses" })], []);
+});
+
+test("sitemap lists only canonical category pages, once each, with no label-derived duplicates", () => {
+    const entries = buildSitemapEntries({
+        siteUrl: SITE,
+        products: [
+            { _id: "1", slug: "a", productType: "saree", category: "Silk Sarees", updatedAt: "2026-01-01T00:00:00Z" },
+            { _id: "2", slug: "b", productType: "saree", category: "Sarees", updatedAt: "2026-02-01T00:00:00Z" },
+            { _id: "3", slug: "c", productType: "suit-piece", category: "Suit Pants", updatedAt: "2026-01-01T00:00:00Z" },
+            { _id: "4", slug: "d", productType: "suit", category: "Suit Pieces", updatedAt: "2026-01-01T00:00:00Z" },
+            { _id: "5", slug: "e", productType: "lehenga", category: "Lehenga", updatedAt: "2026-01-01T00:00:00Z" },
+            { _id: "6", slug: "f", productType: "other", category: "Kurti", updatedAt: "2026-01-01T00:00:00Z" },
+            { _id: "7", slug: "g", productType: "other", category: "Dupatta", updatedAt: "2026-01-01T00:00:00Z" }
+        ]
+    });
+    const categoryUrls = entries.map(entry => entry.loc).filter(loc => loc.includes("/category/")).sort();
+    assert.deepEqual(categoryUrls, ["sarees", "suit-pieces", "lehengas", "kurtis"].sort().map(slug => `${SITE}/category/${slug}`));
+    assert.equal(entries.find(entry => entry.loc === `${SITE}/category/sarees`).lastmod, "2026-02-01T00:00:00.000Z");
 });
 
 test("TTL cache expires entries and stays bounded", () => {

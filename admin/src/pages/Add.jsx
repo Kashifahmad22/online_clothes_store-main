@@ -486,6 +486,7 @@ const Add = ({ token }) => {
             <option value='dress'>Dress</option>
             <option value='suit-piece'>Suit piece / dress material</option>
             <option value='lehenga'>Lehenga</option>
+            <option value='kurti'>Kurti</option>
             <option value='other'>Other ethnic wear</option>
           </select>
           <input required value={product.category} onChange={event => setField('category', event.target.value)}

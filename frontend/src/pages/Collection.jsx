@@ -5,12 +5,12 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ShopContext } from '../context/ShopContext'
 import ProductItem from '../components/ProductItem'
 import PromotionBanner from '../components/PromotionBanner'
-import { campaigns, campaignBySlug, categoryFromSlug } from '../config/campaigns'
-import { categoryForSlug, productCategories } from '../config/productCategories'
+import { campaigns, campaignBySlug } from '../config/campaigns'
+import { categoryForSlug, categoryFilterOptions, collectionCategoryParams, productCategories } from '../config/productCategories'
 
 const PAGE_SIZE = 12
 const SORTS = ['newest', 'price-asc', 'price-desc']
-const EMPTY_FACETS = { categories: [], productTypes: [], fabrics: [], colours: [], occasions: [] }
+const EMPTY_FACETS = { fabrics: [], colours: [], occasions: [] }
 const PRODUCT_TYPES = Object.fromEntries(productCategories.map(category => [
   category.slug,
   { value: category.type, label: category.label }
@@ -43,12 +43,12 @@ const Collection = ({ mode = 'all' }) => {
   const { campaignSlug, categorySlug: routeCategory } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const campaign = mode === 'campaign' ? campaignBySlug(campaignSlug) : null
-  const productType = mode === 'category'
-    ? categoryForSlug(routeCategory)?.type || ''
-    : searchParams.get('productType') || ''
-  const category = mode === 'category' && !productType
-    ? categoryFromSlug(routeCategory || '')
-    : searchParams.get('category') || ''
+  const { canonical, subCategory, productType, category, legacyLabel } = collectionCategoryParams({
+    mode,
+    routeCategory,
+    categoryParam: searchParams.get('category') || '',
+    productTypeParam: searchParams.get('productType') || ''
+  })
   const queryString = searchParams.toString()
   const query = useMemo(() => new URLSearchParams(queryString), [queryString])
   const page = Math.max(1, Number(query.get('page')) || 1)
@@ -111,6 +111,8 @@ const Collection = ({ mode = 'all' }) => {
             limit: PAGE_SIZE,
             sort,
             productType: productType || undefined,
+            canonicalCategory: canonical?.id,
+            subCategory: subCategory || undefined,
             category: category || undefined,
             collection: campaign?.collectionTag,
             search: search || undefined,
@@ -142,7 +144,7 @@ const Collection = ({ mode = 'all' }) => {
       window.clearTimeout(timer)
     }
   }, [
-    backendUrl, campaign, category, productType, page, search, sort, mode, fabric, colour, occasion,
+    backendUrl, campaign, category, canonical, subCategory, productType, page, search, sort, mode, fabric, colour, occasion,
     minPrice, maxPrice, availableOnly
   ])
 
@@ -178,7 +180,7 @@ const Collection = ({ mode = 'all' }) => {
   }
 
   const title = campaign?.name || (mode === 'category'
-    ? categoryForSlug(routeCategory)?.label || category
+    ? legacyLabel || subCategory || canonical?.label || categoryForSlug(routeCategory)?.label || category
     : productType ? PRODUCT_TYPES[Object.keys(PRODUCT_TYPES).find(key => PRODUCT_TYPES[key].value === productType)]?.label || 'Shop'
       : 'Shop sarees & ethnic wear')
   const removeParams = keys => {
@@ -189,6 +191,15 @@ const Collection = ({ mode = 'all' }) => {
   }
   const activeFilters = [
     mode !== 'category' && productType && { key: 'productType', label: productType.replace(/-/g, ' '), clear: () => removeParams(['productType']) },
+    mode !== 'category' && canonical && {
+      key: 'category', label: subCategory || canonical.label, clear: () => removeParams(['category'])
+    },
+    mode === 'category' && canonical && subCategory && {
+      key: 'subCategory', label: subCategory, clear: () => navigate(`/category/${canonical.slug}`)
+    },
+    mode === 'category' && canonical && legacyLabel && {
+      key: 'legacyType', label: legacyLabel, clear: () => navigate(`/category/${canonical.slug}`)
+    },
     mode !== 'category' && category && { key: 'category', label: category, clear: () => removeParams(['category']) },
     search && { key: 'search', label: `Search: ${search}`, clear: () => removeParams(['search']) },
     fabric && { key: 'fabric', label: fabric, clear: () => removeParams(['fabric']) },
@@ -282,12 +293,10 @@ const Collection = ({ mode = 'all' }) => {
           </div>
 
           <div className='mt-4 grid gap-3'>
-            <CatalogueSelect label='Product type' value={productType} options={facets.productTypes
-              .filter(type => PRODUCT_TYPES[Object.keys(PRODUCT_TYPES).find(key => PRODUCT_TYPES[key].value === type)])
-              .map(type => ({ value: type, label: PRODUCT_TYPES[Object.keys(PRODUCT_TYPES).find(key => PRODUCT_TYPES[key].value === type)].label }))}
-              onChange={value => changeQuery('productType', value)} allLabel='All product types' />
-            <CatalogueSelect label='Category' value={category} options={facets.categories.map(value => ({ value, label: value }))}
-              onChange={value => changeQuery('category', value)} allLabel='All categories' />
+            {mode !== 'category' && (
+              <CatalogueSelect label='Category' value={canonical?.id || ''} options={categoryFilterOptions}
+                onChange={value => changeQuery('category', value)} allLabel='All categories' />
+            )}
             <CatalogueSelect label='Fabric' value={fabric} options={facets.fabrics.map(value => ({ value, label: value }))}
               onChange={value => changeQuery('fabric', value)} allLabel='All fabrics' />
             <CatalogueSelect label='Colour' value={colour} options={facets.colours.map(value => ({ value, label: value }))}

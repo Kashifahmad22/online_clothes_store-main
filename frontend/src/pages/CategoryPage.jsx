@@ -2,18 +2,21 @@ import { useContext } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ShopContext } from '../context/ShopContext'
 import { storefrontCategories, isUpcomingStorefrontCategory } from '../config/productCategories'
+import { resolveCategorySlug } from '../config/canonicalCategories'
 import Collection from './Collection'
 
 const CategoryPage = () => {
   const { categorySlug } = useParams()
   const { products, productsLoading, productsError } = useContext(ShopContext)
-  const upcomingCandidate = storefrontCategories.find(category => category.slug === categorySlug && !category.alwaysAvailable)
+  // Legacy slugs (e.g. suit-pants) resolve to their canonical category; unknown slugs fall through to the collection.
+  const canonicalSlug = resolveCategorySlug(categorySlug)?.category.slug
+  const upcomingCandidate = storefrontCategories.find(category => category.slug === canonicalSlug && !category.alwaysAvailable)
 
   if (!upcomingCandidate || productsError) return <Collection mode='category' />
   if (productsLoading) {
     return <main className='collection-page'><p role='status' className='py-20 text-center text-sm text-stone-600'>Loading…</p></main>
   }
-  if (!isUpcomingStorefrontCategory(categorySlug, products)) return <Collection mode='category' />
+  if (!isUpcomingStorefrontCategory(canonicalSlug, products)) return <Collection mode='category' />
 
   return (
     <main className='collection-page'>

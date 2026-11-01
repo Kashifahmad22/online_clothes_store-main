@@ -1,4 +1,8 @@
-const productTypes = new Set(["saree", "suit-piece", "suit", "suit-set", "dress", "lehenga", "other"]);
+import {
+    CANONICAL_CATEGORIES, PRODUCT_TYPES, canonicalCategoryClause, categoryById, findSubCategory, subCategoryClause
+} from "../config/catalogueTaxonomy.js";
+
+const productTypes = new Set(PRODUCT_TYPES);
 const sortOptions = new Set(["newest", "price-asc", "price-desc"]);
 
 const invalidQuery = message => Object.assign(new Error(message), { status: 400 });
@@ -53,6 +57,19 @@ export const parseCatalogueQuery = query => {
     }
 
     const category = optionalText(query.category, "Category", 100);
+    const canonicalCategory = optionalText(query.canonicalCategory, "Canonical category", 40);
+    if (canonicalCategory && !categoryById(canonicalCategory)) {
+        throw invalidQuery(`Canonical category must be one of: ${CANONICAL_CATEGORIES.map(item => item.id).join(", ")}.`);
+    }
+    const subCategoryLabel = optionalText(query.subCategory, "Subcategory", 60);
+    let subCategory;
+    if (subCategoryLabel) {
+        subCategory = findSubCategory(subCategoryLabel);
+        if (!subCategory) throw invalidQuery("Subcategory is not recognised.");
+        if (subCategory.categoryId !== canonicalCategory) {
+            throw invalidQuery("Subcategory must be used with its parent canonicalCategory.");
+        }
+    }
     const collection = optionalText(query.collection, "Collection", 100);
     const search = optionalText(query.search, "Search", 100);
     const fabric = optionalText(query.fabric, "Fabric", 100);
@@ -75,6 +92,10 @@ export const parseCatalogueQuery = query => {
     const filter = { status: "published" };
     if (productType) filter.productType = productType;
     if (category) filter.category = category;
+    if (canonicalCategory) {
+        filter.$and = [canonicalCategoryClause(canonicalCategory)];
+        if (subCategory) filter.$and.push(subCategoryClause(subCategory.label));
+    }
     if (collection) filter.collections = collection;
     if (fabric) filter["details.fabric"] = exactTextFilter(fabric);
     if (colour) filter["details.colour"] = exactTextFilter(colour);

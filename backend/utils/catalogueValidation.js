@@ -1,8 +1,9 @@
 import mongoose from "mongoose";
 import { isLowStock } from "./merchandising.js";
+import { PRODUCT_TYPES } from "../config/catalogueTaxonomy.js";
 
 const invalidInput = message => Object.assign(new Error(message), { status: 400 });
-const productTypes = new Set(["saree", "suit-piece", "suit", "suit-set", "dress", "lehenga", "other"]);
+const productTypes = new Set(PRODUCT_TYPES);
 const imageRoles = new Set([
     "primary", "full-saree", "border", "pallu", "blouse", "detail", "lifestyle", "other"
 ]);
