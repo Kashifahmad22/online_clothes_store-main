@@ -5,6 +5,7 @@ import { ShopContext } from '../context/ShopContext'
 import ProductGallery from '../components/ProductGallery'
 import ProductPrice from '../components/ProductPrice'
 import RelatedProducts from '../components/RelatedProducts'
+import ProductReviews from '../components/ProductReviews'
 import MerchandisingBadges from '../components/MerchandisingBadges'
 import ProductTrustInfo from '../components/ProductTrustInfo'
 import QuantitySelector from '../components/QuantitySelector'
@@ -315,6 +316,8 @@ const Product = () => {
           </div>
         </div>
       )}
+
+      <ProductReviews productId={product._id} />
 
       <RelatedProducts product={product} />
     </main>

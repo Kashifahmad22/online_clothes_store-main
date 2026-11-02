@@ -110,6 +110,16 @@ export const buildProductSeo = (product, variants, { siteUrl, brandName }) => {
         availability: `https://schema.org/${offer.inStock ? "InStock" : "OutOfStock"}`,
         ...(offers.length > 1 ? { sku: offer.sku } : {})
     });
+    const rating = product.ratingSummary;
+    if (rating && Number.isInteger(rating.count) && rating.count > 0 && rating.average >= 1 && rating.average <= 5) {
+        jsonLd.aggregateRating = {
+            "@type": "AggregateRating",
+            ratingValue: rating.average,
+            reviewCount: rating.count,
+            bestRating: 5,
+            worstRating: 1
+        };
+    }
     if (offers.length) {
         jsonLd.offers = offers.length === 1 ? toOffer(offers[0]) : offers.map(toOffer);
     } else if (Number.isSafeInteger(product.pricePaise)) {

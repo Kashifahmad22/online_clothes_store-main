@@ -131,6 +131,16 @@ export const buildProductJsonLd = (product, { siteUrl, brandName }) => {
     ...(text(product.details?.colour) ? { color: product.details.colour.trim() } : {}),
     ...(offers.length === 1 ? { sku: offers[0].sku } : {})
   }
+  const rating = product.ratingSummary
+  if (rating && Number.isInteger(rating.count) && rating.count > 0 && rating.average >= 1 && rating.average <= 5) {
+    data.aggregateRating = {
+      '@type': 'AggregateRating',
+      ratingValue: rating.average,
+      reviewCount: rating.count,
+      bestRating: 5,
+      worstRating: 1
+    }
+  }
   if (offers.length) {
     data.offers = offers.length === 1 ? toOffer(offers[0]) : offers.map(toOffer)
   } else if (Number.isFinite(product.price)) {

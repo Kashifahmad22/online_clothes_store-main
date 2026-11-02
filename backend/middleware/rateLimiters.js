@@ -44,6 +44,14 @@ export const createDeliveryLimiter = ({ limit = 30 } = {}) => rateLimit({
     message: { success: false, message: 'Too many delivery checks. Please try again shortly.' }
 })
 
+// Review submissions can trigger Cloudinary uploads, so they get a small per-client budget.
+export const createReviewLimiter = ({ limit = 10 } = {}) => rateLimit({
+    ...baseOptions,
+    windowMs: 60 * 60 * 1000,
+    limit,
+    message: { success: false, message: 'Too many review submissions. Please try again later.' }
+})
+
 export const createAuthLimiter = ({ limit = 10 } = {}) => rateLimit({
     ...baseOptions,
     windowMs: 15 * 60 * 1000,

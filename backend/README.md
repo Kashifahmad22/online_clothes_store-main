@@ -322,3 +322,9 @@ npm test
 ## Delivery PIN-code checker
 
 `GET /api/delivery/check?pincode=NNNNNN` is public and rate-limited. With no provider configured it returns `manual_confirmation` and never a date. Setting `DELIVERY_PROVIDER=shiprocket` plus `SHIPROCKET_EMAIL`, `SHIPROCKET_PASSWORD` and `DELIVERY_PICKUP_PINCODE` enables the Shiprocket lookup (`DELIVERY_HANDLING_DAYS` adds your dispatch time to courier estimates). **The Shiprocket request/response handling is implemented from its documented shape but has NOT been verified against the live API**; test it with real credentials before relying on it. Provider failures return `unavailable` (HTTP 503), never serviceable.
+
+## Product reviews
+
+- Public: `GET /api/review/product/:productId?page&limit` (approved reviews + stored `ratingSummary`). Customer (`token` header): `GET /api/review/mine/:productId`, `POST` and `PUT /api/review/product/:productId` (multipart, up to 4 JPG/PNG/WebP photos, 5 MB each, uploaded to `patna-saree-handloom/reviews`). Admin: `GET /api/review/admin/list`, `GET /api/review/admin/:id`, `PATCH /api/review/admin/:id/moderate`, `POST /api/review/admin/import`.
+- New reviews are `pending` until an admin approves them. Only `approved` reviews are public and counted in `products.ratingSummary` (recomputed after every public-state change).
+- `verifiedPurchase` is set only by the backend: a Delivered order containing the product, paid (or COD), not refunded and not on payment hold. Imported testimonials are never verified.

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import ProductPrice from './ProductPrice'
 import OptimizedImage from './OptimizedImage'
 import MerchandisingBadges from './MerchandisingBadges'
+import { RatingBadge } from './RatingBadge'
 import { getAvailableStock, getCardAttributes, getPriceSummary, getProductImage, showLowStockNote } from '../utils/productDisplay'
 
 const ProductItem = ({ product }) => {
@@ -37,6 +38,7 @@ const ProductItem = ({ product }) => {
         </p>
         {attributes.length > 0 && <p className='product-card__attributes'>{attributes.join(' · ')}</p>}
         <ProductPrice price={price} mrp={mrp} from={from} compact />
+        <RatingBadge summary={product.ratingSummary} />
         <MerchandisingBadges product={product} className='merch-badges--card' hideLowStock />
         {showLowStockNote(product) && <p className='product-card__low-stock'>Only a few left</p>}
       </div>
@@ -60,6 +62,7 @@ ProductItem.propTypes = {
     bestseller: PropTypes.bool,
     fastSelling: PropTypes.bool,
     lowStock: PropTypes.bool,
+    ratingSummary: PropTypes.shape({ count: PropTypes.number, average: PropTypes.number }),
     details: PropTypes.object,
     variants: PropTypes.arrayOf(PropTypes.shape({
       active: PropTypes.bool,

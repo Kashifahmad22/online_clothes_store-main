@@ -43,6 +43,15 @@ const productSchema = new mongoose.Schema({
         index: true
     },
     bestseller: { type: Boolean, default: false },
+    // Derived from approved reviews only (see utils/reviews.js recomputeRatingSummary); never edited by admins.
+    ratingSummary: {
+        type: new mongoose.Schema({
+            count: { type: Number, default: 0 },
+            average: { type: Number, default: 0 },
+            distribution: { type: [Number], default: () => [0, 0, 0, 0, 0] }
+        }, { _id: false }),
+        default: () => ({ count: 0, average: 0, distribution: [0, 0, 0, 0, 0] })
+    },
     fastSelling: { type: Boolean, default: false },
     seo: {
         title: { type: String, trim: true, maxlength: 180 },

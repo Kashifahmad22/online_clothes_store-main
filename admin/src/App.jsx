@@ -7,6 +7,7 @@ import List from './pages/List'
 import Orders from './pages/Orders'
 import PaymentExceptions from './pages/PaymentExceptions'
 import Settings from './pages/Settings'
+import Reviews from './pages/Reviews'
 import Login from './components/Login'
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -53,6 +54,7 @@ const App = () => {
                 <Route path='/list' element={<List token={token} />} />
                 <Route path='/orders' element={<Orders token={token} />} />
                 <Route path='/payment-exceptions' element={<PaymentExceptions token={token} />} />
+                <Route path='/reviews' element={<Reviews token={token} />} />
                 <Route path='/settings' element={<Settings token={token} />} />
               </Routes>
             </div>
