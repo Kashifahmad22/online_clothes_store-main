@@ -328,3 +328,8 @@ npm test
 - Public: `GET /api/review/product/:productId?page&limit` (approved reviews + stored `ratingSummary`). Customer (`token` header): `GET /api/review/mine/:productId`, `POST` and `PUT /api/review/product/:productId` (multipart, up to 4 JPG/PNG/WebP photos, 5 MB each, uploaded to `patna-saree-handloom/reviews`). Admin: `GET /api/review/admin/list`, `GET /api/review/admin/:id`, `PATCH /api/review/admin/:id/moderate`, `POST /api/review/admin/import`.
 - New reviews are `pending` until an admin approves them. Only `approved` reviews are public and counted in `products.ratingSummary` (recomputed after every public-state change).
 - `verifiedPurchase` is set only by the backend: a Delivered order containing the product, paid (or COD), not refunded and not on payment hold. Imported testimonials are never verified.
+### Pre-deployment checks for reviews (open, business rules unchanged)
+
+- **Verified-purchase timing:** a review is verified only when the order status is `Delivered`. Confirm staff reliably set that status, and decide whether reviews should be allowed before delivery. The rule is unchanged.
+- **Partial-refund rule:** an order stops qualifying only when `refundedPaise` is at least `totalPaise` (or `paymentStatus` is `refunded`). A partially refunded order still qualifies. Confirm this is the intended policy before launch.
+- **Real-integration and browser tests not yet run:** real MongoDB (unique index creation, concurrent approvals and the aggregate), real Cloudinary photo upload and cleanup, a real Delivered order, and a browser pass over the storefront review UI and the admin Reviews page. Current tests use mocks.
