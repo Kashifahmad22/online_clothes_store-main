@@ -12,6 +12,7 @@ import {
     whatsappConsentFields
 } from "../utils/orderValidation.js";
 import { isValidIdempotencyKey } from "../utils/paymentSecurity.js";
+import { imagesForVariant } from "../utils/catalogueValidation.js";
 import {
     FULFILLMENT_STATUSES,
     PHYSICAL_FULFILMENT_STATUSES,
@@ -94,7 +95,7 @@ export const buildOrderItems = async (items, session) => {
             variantId: variant._id.toString(),
             sku: variant.sku,
             name: product.name,
-            image: product.images.map(image => image.url),
+            image: imagesForVariant(product.images, variant.sku).map(image => image.url),
             quantity: item.quantity,
             unitPricePaise
         });
@@ -141,7 +142,7 @@ const quoteOrder = async (req, res) => {
             return {
                 productId, variantId, quantity,
                 name: product.name,
-                image: product.images?.[0]?.url || "",
+                image: imagesForVariant(product.images, variant.sku)[0]?.url || "",
                 options,
                 unitPricePaise,
                 lineTotalPaise: unitPricePaise * quantity,

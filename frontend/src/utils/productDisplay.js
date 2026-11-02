@@ -48,9 +48,8 @@ export const getMerchandisingBadges = product => {
   return badges
 }
 
-export const getProductImage = product => {
-  const images = [...(product?.images || [])].sort((a, b) => (a.order || 0) - (b.order || 0))
-  return images.find(image => image.role === 'primary') || images[0] || null
+export const getProductImage = (product, sku) => {
+  return imagesForVariant(product?.images, sku)[0] || null
 }
 
 const toPaise = value => (Number.isFinite(value) && value >= 0 ? Math.round(value * 100) : null)
@@ -88,3 +87,19 @@ export const showLowStockNote = product => product?.lowStock === true && getAvai
 export const getAvailableStock = product => (product?.variants || [])
   .filter(isVariantAvailable)
   .reduce((total, variant) => total + availableQuantity(variant), 0)
+
+// Photos for a variant: its own tagged photos first, then shared (untagged) ones. Untagged legacy galleries are
+// unchanged; a variant without tagged photos never shows another colour's photos.
+export const imagesForVariant = (images, sku) => {
+  const list = Array.isArray(images) ? images : []
+  const key = typeof sku === 'string' ? sku.trim().toUpperCase() : ''
+  const byOrder = (a, b) => {
+    if (a.role === 'primary') return -1
+    if (b.role === 'primary') return 1
+    return (a.order || 0) - (b.order || 0)
+  }
+  if (!key) return [...list].sort(byOrder)
+  const own = list.filter(image => image.variantSku === key)
+  const shared = list.filter(image => !image.variantSku)
+  return [...own.sort(byOrder), ...shared.sort(byOrder)]
+}

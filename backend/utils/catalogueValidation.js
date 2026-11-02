@@ -56,6 +56,50 @@ const cleanAltText = (value, position) => {
     return text;
 };
 
+const SKU_PATTERN = /^[A-Z0-9][A-Z0-9._-]{1,39}$/;
+
+export const cleanVariantSku = (value, position) => {
+    if (value === undefined || value === null || value === "") return "";
+    const sku = typeof value === "string" ? value.trim().toUpperCase() : "";
+    if (!SKU_PATTERN.test(sku)) throw invalidInput(`Image ${position} has an invalid colour/variant SKU.`);
+    return sku;
+};
+
+export const parseImageVariants = (raw, fileCount) => {
+    if (!raw) return Array.from({ length: fileCount }, () => "");
+    let list;
+    try {
+        list = JSON.parse(raw);
+    } catch {
+        throw invalidInput("Image colour assignments must be valid JSON.");
+    }
+    if (!Array.isArray(list) || list.length !== fileCount) {
+        throw invalidInput("Provide one colour assignment for each uploaded image.");
+    }
+    return list.map((sku, index) => cleanVariantSku(sku, index + 1));
+};
+
+// Photos may only be tagged with a SKU that belongs to this product, so a typo or removed SKU cannot hide a photo.
+export const assertImageSkusExist = (images, skus) => {
+    const known = new Set((skus || []).filter(sku => typeof sku === "string").map(sku => sku.trim().toUpperCase()));
+    const unknown = (images || []).find(image => image.variantSku && !known.has(image.variantSku));
+    if (unknown) {
+        throw invalidInput(`An image is assigned to SKU ${unknown.variantSku}, which is not a variant of this product.`);
+    }
+};
+
+// Photos for one variant: its own tagged photos, then shared (untagged) ones. A variant with no tagged photos
+// shows only the shared set, never another colour's photos. Legacy untagged galleries therefore behave as before.
+// With no variant context (cards, listings) the whole gallery is used so tagged-only products still show a photo.
+export const imagesForVariant = (images, sku) => {
+    const list = Array.isArray(images) ? images : [];
+    const key = typeof sku === "string" ? sku.trim().toUpperCase() : "";
+    if (!key) return list;
+    const own = key ? list.filter(image => image.variantSku === key) : [];
+    const shared = list.filter(image => !image.variantSku);
+    return [...own, ...shared];
+};
+
 export const parseImageAlts = (raw, fileCount) => {
     if (!raw) return Array.from({ length: fileCount }, () => "");
     let alts;
@@ -77,7 +121,8 @@ export const assembleImages = images => {
     const cleaned = images.map((image, index) => ({
         url: image.url,
         role: image.role || "other",
-        altText: cleanAltText(image.altText, index + 1)
+        altText: cleanAltText(image.altText, index + 1),
+        variantSku: cleanVariantSku(image.variantSku, index + 1)
     }));
     const primaries = cleaned.filter(image => image.role === "primary");
     if (primaries.length > 1) {
@@ -99,12 +144,14 @@ export const imagesUnchanged = (submitted, stored, uploadCount = 0) =>
     submitted.every((image, index) =>
         image?.url === stored[index].url &&
         (image.role || "other") === (stored[index].role || "other") &&
-        (image.altText || "") === (stored[index].altText || ""));
+        (image.altText || "") === (stored[index].altText || "") &&
+        (image.variantSku || "") === (stored[index].variantSku || ""));
 
 export const keepStoredImages = stored => stored.map((image, index) => ({
     url: image.url,
     role: image.role || "other",
     altText: typeof image.altText === "string" ? image.altText : "",
+    ...(typeof image.variantSku === "string" && image.variantSku ? { variantSku: image.variantSku } : {}),
     order: Number.isInteger(image.order) ? image.order : index
 }));
 

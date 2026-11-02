@@ -5,12 +5,14 @@ import productModel from "../models/productModel.js";
 import productVariantModel from "../models/productVariantModel.js";
 import {
     assembleImages,
+    assertImageSkusExist,
     imagesUnchanged,
     isValidObjectId,
     keepStoredImages,
     normaliseDetailAttributes,
     parseImageAlts,
     parseImageRoles,
+    parseImageVariants,
     parseProductPayload,
     toPublicProduct,
     validatePublishableProduct
@@ -51,11 +53,12 @@ const respondError = (res, error) => {
     return res.status(500).json({ success: false, message: "Unable to complete the product request." });
 };
 
-const uploadImages = async (files, rawRoles, rawAlts, retained = []) => {
+const uploadImages = async (files, rawRoles, rawAlts, retained = [], rawVariants, skus = []) => {
     const roles = parseImageRoles(rawRoles, files.length);
     const alts = parseImageAlts(rawAlts, files.length);
+    const variantSkus = parseImageVariants(rawVariants, files.length);
     // Reject a bad primary/alt combination before anything is sent to Cloudinary.
-    assembleImages([...retained, ...files.map((_, index) => ({ url: "pending", role: roles[index], altText: alts[index] }))]);
+    assertImageSkusExist(assembleImages([...retained, ...files.map((_, index) => ({ url: "pending", role: roles[index], altText: alts[index], variantSku: variantSkus[index] }))]), skus);
     return Promise.all(files.map(async (file, index) => {
         const result = await cloudinary.uploader.upload(file.path, {
             resource_type: "image",
@@ -65,6 +68,7 @@ const uploadImages = async (files, rawRoles, rawAlts, retained = []) => {
             url: result.secure_url,
             role: roles[index],
             altText: alts[index],
+            variantSku: variantSkus[index],
             order: index
         };
     }));
@@ -129,7 +133,7 @@ const addProduct = async (req, res) => {
         if (payload.status === "archived") {
             return res.status(400).json({ success: false, message: "A new product cannot be created as archived." });
         }
-        const uploadedImages = await uploadImages(files, req.body.imageRoles, req.body.imageAlts, payload.images || []);
+        const uploadedImages = await uploadImages(files, req.body.imageRoles, req.body.imageAlts, payload.images || [], req.body.imageVariants, (payload.variants || []).map(variant => variant.sku));
         const images = assembleImages([...(payload.images || []), ...uploadedImages]);
         if (images.length > 12) {
             return res.status(400).json({ success: false, message: "A product can have up to 12 images." });
@@ -185,10 +189,11 @@ const updateProduct = async (req, res) => {
         normaliseDetailAttributes(payload.details, product.details);
 
         const retainedImages = Array.isArray(payload.images) ? payload.images : product.images;
+        const existingVariants = await productVariantModel.find({ productId: product._id });
         const keepStored = imagesUnchanged(retainedImages, product.images, files.length);
         const uploadedImages = keepStored
             ? []
-            : await uploadImages(files, req.body.imageRoles, req.body.imageAlts, retainedImages);
+            : await uploadImages(files, req.body.imageRoles, req.body.imageAlts, retainedImages, req.body.imageVariants, [...(payload.variants || []).map(variant => variant.sku), ...existingVariants.map(variant => variant.sku)]);
         const images = keepStored
             ? keepStoredImages(product.images)
             : assembleImages([...retainedImages, ...uploadedImages]);
@@ -199,7 +204,6 @@ const updateProduct = async (req, res) => {
             return res.status(400).json({ success: false, message: "At least one product image is required." });
         }
         const status = resolveStatusForEdit(product.status, payload.status);
-        const existingVariants = await productVariantModel.find({ productId: product._id });
         const plan = planVariantChanges(existingVariants, payload.variants);
         validatePublishableProduct(
             { ...payload, status, variants: plan.activeCount > 0 ? [{ active: true }] : [] },

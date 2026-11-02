@@ -62,7 +62,7 @@ const Cart = () => {
           <section aria-label='Cart items' className='cart-lines'>
             {cartData.map(item => {
               const { product, variant } = item
-              const image = getProductImage(product)
+              const image = getProductImage(product, variant?.sku)
               const optionLabel = variant
                 ? Object.values(variant.options || {}).join(' / ') || variant.sku
                 : 'Unavailable option'

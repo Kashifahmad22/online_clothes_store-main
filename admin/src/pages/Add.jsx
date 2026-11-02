@@ -96,7 +96,7 @@ const IMAGE_ROLES = [
   ['blouse', 'Blouse'], ['detail', 'Detail'], ['lifestyle', 'Lifestyle'], ['other', 'Other']
 ]
 
-const ImageRow = ({ kind, position, src, image, index, total, onRole, onAlt, onMove, onRemove }) => {
+const ImageRow = ({ kind, position, src, image, index, total, skus = [], onRole, onAlt, onVariant, onMove, onRemove }) => {
   const error = altTextError(position, image.altText)
   const isPrimary = image.role === 'primary'
   return (
@@ -120,6 +120,13 @@ const ImageRow = ({ kind, position, src, image, index, total, onRole, onAlt, onM
               {IMAGE_ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </label>
+          <label className='grid gap-1 text-sm'>Colour / variant
+            <select value={image.variantSku || ''} onChange={event => onVariant(kind, index, event.target.value)}
+              className='px-3 py-2'>
+              <option value=''>All variants (shared)</option>
+              {skus.map(sku => <option key={sku} value={sku}>{sku}</option>)}
+            </select>
+          </label>
           {!isPrimary && (
             <button type='button' onClick={() => onRole(kind, index, 'primary')} className='border px-3 py-2'>
               Make primary
@@ -141,9 +148,11 @@ ImageRow.propTypes = {
   kind: PropTypes.oneOf(['saved', 'upload']).isRequired,
   position: PropTypes.number.isRequired,
   src: PropTypes.string.isRequired,
-  image: PropTypes.shape({ role: PropTypes.string, altText: PropTypes.string }).isRequired,
+  image: PropTypes.shape({ role: PropTypes.string, altText: PropTypes.string, variantSku: PropTypes.string }).isRequired,
   index: PropTypes.number.isRequired,
   total: PropTypes.number.isRequired,
+  skus: PropTypes.arrayOf(PropTypes.string),
+  onVariant: PropTypes.func.isRequired,
   onRole: PropTypes.func.isRequired,
   onAlt: PropTypes.func.isRequired,
   onMove: PropTypes.func.isRequired,
@@ -449,6 +458,7 @@ const Add = ({ token }) => {
     formData.append('product', JSON.stringify(payload))
     formData.append('imageRoles', JSON.stringify(uploads.map(item => item.role)))
     formData.append('imageAlts', JSON.stringify(uploads.map(item => item.altText || '')))
+    formData.append('imageVariants', JSON.stringify(uploads.map(item => item.variantSku || '')))
     uploads.forEach(item => formData.append('images', item.file))
 
     savingRef.current = true
@@ -535,6 +545,15 @@ const Add = ({ token }) => {
   }))
   const setUploadAlt = (index, altText) => setUploads(current =>
     current.map((upload, i) => (i === index ? { ...upload, altText } : upload)))
+  const changeImageVariant = (kind, index, variantSku) => {
+    const apply = (_, i) => i === index
+    if (kind === 'saved') {
+      setProduct(current => ({ ...current, images: current.images.map((image, i) => (apply(image, i) ? { ...image, variantSku } : image)) }))
+    } else {
+      setUploads(current => current.map((upload, i) => (apply(upload, i) ? { ...upload, variantSku } : upload)))
+    }
+  }
+  const variantSkus = product.variants.map(variant => variant.sku.trim().toUpperCase()).filter(Boolean)
   const moveSaved = (from, to) => setProduct(current => ({ ...current, images: moveItem(current.images, from, to) }))
   const moveUpload = (from, to) => setUploads(current => moveItem(current, from, to))
 
@@ -820,12 +839,14 @@ const Add = ({ token }) => {
         )}
         {product.images.map((image, index) => (
           <ImageRow key={image.url} kind='saved' position={index + 1} src={image.url} image={image}
-            index={index} total={product.images.length} onRole={changeRole} onAlt={setSavedAlt} onMove={moveSaved}
+            index={index} total={product.images.length} skus={variantSkus} onVariant={changeImageVariant}
+            onRole={changeRole} onAlt={setSavedAlt} onMove={moveSaved}
             onRemove={removeExistingImage} />
         ))}
         {previews.map((item, index) => (
           <ImageRow key={`${item.file.name}-${index}`} kind='upload' position={product.images.length + index + 1}
-            src={item.url} image={item} index={index} total={previews.length} onRole={changeRole}
+            src={item.url} image={item} index={index} total={previews.length} skus={variantSkus}
+            onVariant={changeImageVariant} onRole={changeRole}
             onAlt={setUploadAlt} onMove={moveUpload}
             onRemove={i => setUploads(current => current.filter((_, j) => j !== i))} />
         ))}

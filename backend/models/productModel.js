@@ -9,6 +9,8 @@ const imageSchema = new mongoose.Schema({
         default: "other"
     },
     altText: { type: String, trim: true, default: "" },
+    // SKU of the colour/variant this photo shows. Empty means the photo is shared by every variant.
+    variantSku: { type: String, trim: true, uppercase: true, default: "" },
     order: { type: Number, min: 0, default: 0 }
 }, { _id: false });
 

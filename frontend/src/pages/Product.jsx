@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { ShopContext } from '../context/ShopContext'
 import ProductGallery from '../components/ProductGallery'
@@ -10,7 +10,7 @@ import ProductTrustInfo from '../components/ProductTrustInfo'
 import QuantitySelector from '../components/QuantitySelector'
 import DeliveryChecker from '../components/DeliveryChecker'
 import { resolveProductCategory } from '../config/canonicalCategories'
-import { isVariantAvailable, remainingQuantity, validatePurchaseQuantity } from '../utils/productDisplay'
+import { imagesForVariant, isVariantAvailable, remainingQuantity, validatePurchaseQuantity } from '../utils/productDisplay'
 import { applyPageMeta, buildProductJsonLd, buildProductMeta, normaliseSiteUrl, setJsonLd } from '../utils/seo'
 
 const detailLabels = {
@@ -51,7 +51,8 @@ const Product = () => {
   const { backendUrl, getProductById, updateQuantity, cartItems, navigate, siteSettings, siteSettingsLoaded, siteSettingsError } = useContext(ShopContext)
   const [quantity, setQuantity] = useState('1')
   const [product, setProduct] = useState(null)
-  const [variantId, setVariantId] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const variantParam = (searchParams.get('variant') || '').toUpperCase()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [addingToCart, setAddingToCart] = useState(false)
@@ -65,9 +66,6 @@ const Product = () => {
       .then(data => {
         if (!active) return
         setProduct(data)
-        const variants = data.variants || []
-        const firstAvailable = variants.find(isVariantAvailable)
-        setVariantId((firstAvailable || variants.find(variant => variant.active !== false))?._id || '')
       })
       .catch(requestError => {
         if (!active) return
@@ -95,6 +93,15 @@ const Product = () => {
     return () => observer.disconnect()
   }, [productId])
 
+  const variantId = useMemo(() => {
+    const variants = product?.variants || []
+    const fromUrl = variantParam && variants.find(variant => variant.active !== false && String(variant.sku).toUpperCase() === variantParam)
+    return (fromUrl || variants.find(isVariantAvailable) || variants.find(variant => variant.active !== false))?._id || ''
+  }, [product, variantParam])
+  const selectVariant = variant => setSearchParams(
+    current => { const next = new URLSearchParams(current); next.set('variant', variant.sku); return next }
+  )
+
   useEffect(() => { setQuantity('1') }, [variantId, productId])
 
   const selectedVariant = product?.variants?.find(variant => variant._id === variantId)
@@ -105,12 +112,10 @@ const Product = () => {
   const remaining = remainingQuantity(selectedVariant, inCart)
   const quantityCheck = validatePurchaseQuantity(quantity, selectedVariant, inCart)
   const canAdd = isAvailable && quantityCheck.valid
-  const productImages = useMemo(() => [...(product?.images || [])]
-    .sort((a, b) => {
-      if (a.role === 'primary') return -1
-      if (b.role === 'primary') return 1
-      return (a.order || 0) - (b.order || 0)
-    }), [product])
+  const productImages = useMemo(
+    () => imagesForVariant(product?.images, selectedVariant?.sku),
+    [product, selectedVariant?.sku]
+  )
   const specifications = Object.entries(product?.details || {}).flatMap(([key, value]) => {
     if (key === 'specifications' || key === 'blousePieceIncluded' ||
       key.startsWith('blouse') && !product?.details?.blousePieceIncluded) return []
@@ -173,7 +178,7 @@ const Product = () => {
   return (
     <main className='product-page'>
       <div className='product-layout'>
-        <ProductGallery key={product._id} images={productImages} productName={product.name} />
+        <ProductGallery key={`${product._id}-${selectedVariant?.sku || ''}`} images={productImages} productName={product.name} />
 
         <section className='product-info pb-20 md:pb-0'>
           <nav aria-label='Breadcrumb' className='product-breadcrumbs'>
@@ -217,7 +222,7 @@ const Product = () => {
                       type='button'
                       key={variant._id}
                       disabled={!available}
-                      onClick={() => setVariantId(variant._id)}
+                      onClick={() => selectVariant(variant)}
                       aria-pressed={variant._id === variantId}
                       className={`variant-option min-h-11 border px-3 py-2 text-sm ${variant._id === variantId ? 'variant-option--selected' : ''} disabled:cursor-not-allowed disabled:opacity-50`}
                     >

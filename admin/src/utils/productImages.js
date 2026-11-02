@@ -43,7 +43,8 @@ export const imagesUnchanged = (saved, uploads, original) =>
   uploads.length === 0 && Array.isArray(original) && saved.length === original.length &&
   saved.every((image, i) => image.url === original[i].url &&
     (image.role || 'other') === (original[i].role || 'other') &&
-    (image.altText || '') === (original[i].altText || ''))
+    (image.altText || '') === (original[i].altText || '') &&
+    (image.variantSku || '') === (original[i].variantSku || ''))
 
 export const primaryMessage = (saved, uploads) => {
   const count = countPrimary(saved, uploads)
